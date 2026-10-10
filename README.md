@@ -35,11 +35,11 @@ Flutter app ──invoke──▶ Edge Function `generate-song` ──▶ AI mus
 
 ## 第一次設定
 
-1. **Supabase**：開一個新 project（唔好同 tio-help 共用）。
+1. **Supabase**：project `ewvaukmegoyuvrtxvbhf`（TIO Studio Project，東京）。migration、成員名單、`generate-song` 已經 set 好；以下係由零開始嘅步驟。
    ```sh
    supabase link --project-ref <ref>
    supabase db push                       # migrations/0001
-   # 改好 supabase/seed.sql 入面三個成員嘅 email，然後喺 SQL editor 行一次
+   # 喺 SQL editor 行一次 supabase/seed.sql（成員名單）
    supabase secrets set ELEVENLABS_API_KEY=<key>
    supabase functions deploy generate-song
    ```
