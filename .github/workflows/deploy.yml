@@ -1,0 +1,45 @@
+name: Deploy web to Cloudflare Pages
+
+# Builds the Flutter web app and deploys it on every push to main.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN       token with "Cloudflare Pages: Edit"
+#   CLOUDFLARE_ACCOUNT_ID
+#   SUPABASE_URL               https://<ref>.supabase.co
+#   SUPABASE_PUBLISHABLE_KEY   publishable (public) key — safe in the bundle
+#
+# Every --dart-define used locally must also be passed here (tio-help
+# pitfall #4). The Pages project must already exist as "happy-family-studio".
+# Skipped until the Cloudflare secrets exist so a fresh repo stays green.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HAS_CF: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.HAS_CF == 'true'
+      - uses: subosito/flutter-action@v2
+        if: env.HAS_CF == 'true'
+        with:
+          channel: stable
+          cache: true
+      - if: env.HAS_CF == 'true'
+        run: flutter pub get
+      - if: env.HAS_CF == 'true'
+        run: >
+          flutter build web --release
+          --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          --dart-define=SUPABASE_PUBLISHABLE_KEY=${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      - if: env.HAS_CF == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy build/web --project-name=happy-family-studio --branch=main

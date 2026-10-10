@@ -1,0 +1,6 @@
+# Supabase CLI config. Link the real project with:
+#   supabase link --project-ref <ref>
+project_id = "happy-family-studio"
+
+[functions.generate-song]
+verify_jwt = true
