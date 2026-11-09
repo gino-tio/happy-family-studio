@@ -12,6 +12,19 @@ class StylePreset {
           '90s Hong Kong Cantopop guitar rock, jangly Fender clean tones, '
           'male vocal, 120 BPM, G major.',
     ),
+    // From @paragonrhythms "City Pop" step-sequencer reel: Am7 → Dm9 over
+    // a syncopated bass with a chromatic A–D♭–D walk-up, guitar stabs on
+    // the off-beats and horn stabs on top.
+    StylePreset(
+      'City Pop',
+      '80s Japanese / Hong Kong city pop, 105 BPM, light swing, F major. '
+          'Chords Am7 to Dm9, one bar each, looping. Warm Rhodes electric '
+          'piano holding the chords, syncopated finger bass walking up '
+          'chromatically A, D-flat, D into the Dm9, clean funky guitar '
+          'chord stabs on the off-beats, bright brass section stabs on top. '
+          'Tight kick, snare on 2 and 4, busy 16th-note hi-hats. '
+          'Smooth Cantopop vocal.',
+    ),
     StylePreset(
       '90s 廣東情歌',
       '90s Cantopop ballad, piano and strings, warm female vocal, '
