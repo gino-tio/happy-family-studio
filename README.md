@@ -6,6 +6,19 @@ AI 生成成首歌 → 喺歌曲庫一齊聽。
 樂隊嘅歌、譜同 stems 喺 [`happy-family-big-band`](https://github.com/gino-tio/happy-family-big-band)。
 架構參考 `tio-help`：Flutter（Web + iOS + Android 一套 code）+ Supabase。
 
+## Beat 格仔（Step Sequencer）
+
+歌曲庫右上角 ▦ 掣。好似 beat maker 咁逐格砌節奏：Kick、Snare、Hats、Bass、E. Piano、Guitar、Horns，
+兩小節 32 格（16 分音符），每半小節一個和弦。
+
+- 撳格仔開／關；Bass 撳一下用嗰段和弦嘅根音，長撳揀音；撳和弦名改和弦
+- 調 BPM（60–180）同 Swing（50–75%），撳 ▶ 即刻循環播放
+- 範例：**City Pop**（105 BPM · swing 54% · Am7 → Dm9 · 銅管喺頂）、**星期六返嚟 Rock**、空白
+- **「用呢個 beat 作歌」**：將格仔轉做風格 prompt（BPM、和弦、鼓、bass line、樂器），帶去「作新歌」
+
+聲音係 app 自己用 Dart 合成（`lib/audio/beat_synth.dart`），唔使素材、唔使網絡，
+每一下都準到 sample，所以網頁、iOS、Android 一樣準。聲音係簡單合成音色，用嚟聽 groove 同和弦，唔係成品混音。
+
 ## 點運作
 
 ```
@@ -63,6 +76,8 @@ deno check supabase/functions/generate-song/index.ts && deno test supabase/funct
 ```
 
 ## 下一步（未做）
+
+- Beat 格仔：儲存／分享 pattern（Supabase table）、每格力度、更多小節、真樂器素材
 
 - 用 ElevenLabs `composition_plan` 按 [Verse]/[Chorus] 分段生成，控制每段長度
 - 俾分、留言、「呢個 take 最好」

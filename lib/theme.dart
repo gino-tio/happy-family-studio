@@ -6,6 +6,7 @@ class StudioColors {
   static const neon = Color(0xFFFF4F8B); // 霓虹 pink
   static const amber = Color(0xFFFFB627); // 小巴 amber
   static const teal = Color(0xFF2EC4B6);
+  static const brass = Color(0xFFFF8A3D); // horns row in the beat grid
   static const error = Color(0xFFE53935);
   static const background = Color(0xFF14121A);
   static const surface = Color(0xFF1F1C27);

@@ -9,7 +9,11 @@ import 'song_screen.dart';
 
 /// 作新歌 — title + style prompt + lyrics → generate-song Edge Function.
 class ComposeScreen extends StatefulWidget {
-  const ComposeScreen({super.key});
+  const ComposeScreen({super.key, this.initialTitle, this.initialStyle});
+
+  /// Prefill from the beat grid ("用呢個 beat 作歌").
+  final String? initialTitle;
+  final String? initialStyle;
 
   @override
   State<ComposeScreen> createState() => _ComposeScreenState();
@@ -17,8 +21,8 @@ class ComposeScreen extends StatefulWidget {
 
 class _ComposeScreenState extends State<ComposeScreen> {
   final _form = GlobalKey<FormState>();
-  final _title = TextEditingController();
-  final _style = TextEditingController();
+  late final _title = TextEditingController(text: widget.initialTitle);
+  late final _style = TextEditingController(text: widget.initialStyle);
   final _lyrics = TextEditingController();
   bool _instrumental = false;
   double _seconds = 120;

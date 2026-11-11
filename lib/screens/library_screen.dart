@@ -6,6 +6,7 @@ import '../models/song.dart';
 import '../services/auth_service.dart';
 import '../services/songs_service.dart';
 import '../theme.dart';
+import 'beat_screen.dart';
 import 'compose_screen.dart';
 import 'song_screen.dart';
 
@@ -20,6 +21,12 @@ class LibraryScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('歌曲庫'),
         actions: [
+          IconButton(
+            tooltip: 'Beat 格仔',
+            icon: const Icon(Icons.grid_on),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const BeatScreen())),
+          ),
           IconButton(
             tooltip: '登出',
             icon: const Icon(Icons.logout),
