@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../config.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
-import 'library_screen.dart';
+import 'home_screen.dart';
 import 'sign_in_screen.dart';
 
 class AuthGate extends StatelessWidget {
@@ -23,7 +23,7 @@ class AuthGate extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        if (snap.data == true) return const LibraryScreen();
+        if (snap.data == true) return const HomeScreen();
         return _NotAMember(email: auth.currentUser?.email ?? '');
       },
     );

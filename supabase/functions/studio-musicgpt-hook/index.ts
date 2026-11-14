@@ -4,7 +4,7 @@
 // our own key (finishMusicGpt). A task id that isn't one of our 'generating' songs does nothing.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { finishMusicGpt } from "../studio-generate-song/providers/musicgpt.ts";
+import { enrichMusicGpt, finishMusicGpt } from "../studio-generate-song/providers/musicgpt.ts";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("POST only", { status: 405 });
@@ -30,6 +30,8 @@ Deno.serve(async (req) => {
   });
   try {
     const r = await finishMusicGpt(admin, "app_studio", "studio-songs", key, taskId);
+    // Cover and timed-lyrics webhooks come after the audio one: fill them in on finished rows.
+    if (r === "done" || r === "unknown") await enrichMusicGpt(admin, "app_studio", key, taskId);
     return new Response(r, { status: 200 });
   } catch (e) {
     console.error("musicgpt hook finish failed", (e as Error).message);

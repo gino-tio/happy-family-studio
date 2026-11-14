@@ -30,7 +30,8 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { elevenLabsProvider } from "./providers/elevenlabs.ts";
-import { finishMusicGpt, musicgptBody, submitMusicGpt } from "./providers/musicgpt.ts";
+import { enrichMusicGpt, finishMusicGpt, musicgptBody, submitMusicGpt } from "./providers/musicgpt.ts";
+import { requestCover } from "../_shared/cover.ts";
 import type { MusicProvider, SongRequest } from "./providers/types.ts";
 
 const SCHEMA = "app_studio";
@@ -144,17 +145,31 @@ Deno.serve(async (req) => {
       provider_song_id: taskId,
     }).select().single();
     if (insertErr) return json(500, { error: insertErr.message });
-    // Poll while this worker lives (150 s); the webhook finishes it if it takes longer.
+    // Poll while this worker lives (150 s); the webhook finishes it if it takes longer. After the
+    // audio, keep polling for MusicGPT's cover and timed lyrics; with no cover by the end, Claude
+    // draws one in studio-song-cover (only if the row still has none, so a late MusicGPT cover
+    // isn't overwritten; its own worker, since drawing takes up to two minutes).
     EdgeRuntime.waitUntil((async () => {
       const started = Date.now();
-      while (Date.now() - started < 135_000) {
-        await new Promise((r) => setTimeout(r, 10_000));
+      let done = false;
+      while (Date.now() - started < 120_000) {
+        await new Promise((r) => setTimeout(r, 8_000));
         try {
-          if ((await finishMusicGpt(admin, SCHEMA, BUCKET, key, taskId)) !== "pending") return;
+          if (!done) {
+            const r = await finishMusicGpt(admin, SCHEMA, BUCKET, key, taskId);
+            if (r === "failed") return;
+            if (r === "pending") continue;
+            done = true;
+          }
+          if (await enrichMusicGpt(admin, SCHEMA, key, taskId)) return;
         } catch (e) {
           console.error("musicgpt finish failed", (e as Error).message);
         }
       }
+      if (!done) return;
+      const { data: rows } = await db.from("songs").select("id")
+        .eq("provider_song_id", taskId).eq("status", "done").is("cover_path", null);
+      for (const row of rows ?? []) await requestCover(row.id);
     })());
     return json(202, { song });
   }
@@ -196,6 +211,7 @@ Deno.serve(async (req) => {
         audio_path: path,
         provider_song_id: out.providerSongId,
       }).eq("id", song.id);
+      await requestCover(song.id);
     } catch (e) {
       await db.from("songs").update({
         status: "failed",

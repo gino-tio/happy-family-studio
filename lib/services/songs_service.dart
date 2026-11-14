@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
+import '../models/social.dart';
 import '../models/song.dart';
 
 class SongsService {
@@ -73,6 +74,122 @@ class SongsService {
 
   Future<String> signedAudioUrl(String path) =>
       _client.storage.from(Env.songsBucket).createSignedUrl(path, 60 * 60);
+
+  // Covers -------------------------------------------------------------------
+
+  final _coverUrls = <String, Future<String>>{};
+
+  /// Signed URL of a cover (cached for the session; a new cover has a new path).
+  Future<String> coverUrl(String path) => _coverUrls.putIfAbsent(
+    path,
+    () => _client.storage
+        .from(Env.coversBucket)
+        .createSignedUrl(path, 60 * 60 * 24),
+  );
+
+  /// Asks AI for a new cover. The picture arrives over Realtime in about a minute.
+  Future<void> requestNewCover(String songId) async {
+    try {
+      await _client.functions.invoke(
+        Env.songCoverFunction,
+        body: {'song_id': songId},
+      );
+    } on FunctionException catch (e) {
+      final d = e.details;
+      throw Exception(
+        d is Map && d['error'] is String ? d['error'] : '畫唔到封面，遲啲再試',
+      );
+    }
+  }
+
+  // Band, likes, comments, playlists -----------------------------------------
+
+  String? get currentUserId => _client.auth.currentUser?.id;
+
+  Future<List<Member>> members() async {
+    final rows = await _db.rpc('members') as List;
+    return rows
+        .map((r) => Member.fromRow(Map<String, dynamic>.from(r as Map)))
+        .toList();
+  }
+
+  /// Every like in the band: (song id, user id).
+  Stream<List<({String songId, String userId})>> watchLikes() => _db
+      .from('song_likes')
+      .stream(primaryKey: ['song_id', 'user_id'])
+      .map(
+        (rows) => [
+          for (final r in rows)
+            (songId: r['song_id'] as String, userId: r['user_id'] as String),
+        ],
+      );
+
+  Future<void> setLiked(String songId, bool liked) async {
+    if (liked) {
+      await _db.from('song_likes').upsert({
+        'song_id': songId,
+      }, ignoreDuplicates: true);
+    } else {
+      await _db
+          .from('song_likes')
+          .delete()
+          .eq('song_id', songId)
+          .eq('user_id', currentUserId ?? '');
+    }
+  }
+
+  Stream<List<SongComment>> watchComments(String songId) => _db
+      .from('song_comments')
+      .stream(primaryKey: ['id'])
+      .eq('song_id', songId)
+      .order('created_at', ascending: true)
+      .map((rows) => rows.map(SongComment.fromRow).toList());
+
+  Future<void> addComment(String songId, String body, {String? parentId}) => _db
+      .from('song_comments')
+      .insert({'song_id': songId, 'body': body.trim(), 'parent_id': ?parentId});
+
+  Future<void> deleteComment(String id) =>
+      _db.from('song_comments').delete().eq('id', id);
+
+  Stream<List<Playlist>> watchPlaylists() => _db
+      .from('playlists')
+      .stream(primaryKey: ['id'])
+      .order('created_at', ascending: true)
+      .map((rows) => rows.map(Playlist.fromRow).toList());
+
+  Stream<List<PlaylistEntry>> watchPlaylistEntries() => _db
+      .from('playlist_songs')
+      .stream(primaryKey: ['playlist_id', 'song_id'])
+      .map((rows) => rows.map(PlaylistEntry.fromRow).toList());
+
+  Future<String> createPlaylist(String name) async {
+    final row = await _db
+        .from('playlists')
+        .insert({'name': name.trim()})
+        .select('id')
+        .single();
+    return row['id'] as String;
+  }
+
+  Future<void> renamePlaylist(String id, String name) =>
+      _db.from('playlists').update({'name': name.trim()}).eq('id', id);
+
+  Future<void> deletePlaylist(String id) =>
+      _db.from('playlists').delete().eq('id', id);
+
+  Future<void> addToPlaylist(String playlistId, String songId, int position) =>
+      _db.from('playlist_songs').upsert({
+        'playlist_id': playlistId,
+        'song_id': songId,
+        'position': position,
+      }, ignoreDuplicates: true);
+
+  Future<void> removeFromPlaylist(String playlistId, String songId) => _db
+      .from('playlist_songs')
+      .delete()
+      .eq('playlist_id', playlistId)
+      .eq('song_id', songId);
 
   Future<void> rename(String id, String title) =>
       _db.from('songs').update({'title': title}).eq('id', id);

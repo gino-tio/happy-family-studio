@@ -28,6 +28,12 @@ class Env {
   /// Private bucket that holds the generated audio.
   static const songsBucket = 'studio-songs';
 
+  /// Private bucket that holds song covers.
+  static const coversBucket = 'studio-covers';
+
+  /// Edge Function that draws a new cover with AI (換封面).
+  static const songCoverFunction = 'studio-song-cover';
+
   /// Edge Function that generates a song.
   static const generateSongFunction = 'studio-generate-song';
 
