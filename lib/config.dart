@@ -31,6 +31,9 @@ class Env {
   /// Edge Function that generates a song.
   static const generateSongFunction = 'studio-generate-song';
 
+  /// Edge Function that writes Cantonese lyrics with Claude (via the TIO AI Hub).
+  static const writeLyricsFunction = 'studio-write-lyrics';
+
   static bool get isConfigured =>
       supabaseUrl.isNotEmpty && supabasePublishableKey.isNotEmpty;
 }
