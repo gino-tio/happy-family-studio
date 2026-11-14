@@ -62,7 +62,7 @@ class Song {
   );
 }
 
-/// What the compose screen sends to the `generate-song` Edge Function.
+/// What the compose screen sends to the `studio-generate-song` Edge Function.
 class SongDraft {
   const SongDraft({
     required this.title,

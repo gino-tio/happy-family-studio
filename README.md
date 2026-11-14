@@ -22,13 +22,13 @@ AI 生成成首歌 → 喺歌曲庫一齊聽。
 ## 點運作
 
 ```
-Flutter app ──invoke──▶ Edge Function `generate-song` ──▶ AI music API (ElevenLabs)
+Flutter app ──invoke──▶ Edge Function `studio-generate-song` ──▶ AI music API (ElevenLabs)
      ▲                         │  (vendor key 只喺 server)
      │ Realtime                ▼
      └──────── songs table ◀── upload mp3 → private `songs` bucket
 ```
 
-1. App 叫 `generate-song`，佢檢查你係唔係 `band_members`，開一行 `songs`（status `generating`），即刻返回。
+1. App 叫 `studio-generate-song`，佢檢查你係唔係 Studio 成員（`app_studio.me()`），開一行 `songs`（status `generating`），即刻返回。
 2. Function 喺背景叫 AI，將 mp3 擺入 private bucket，然後將 status 改做 `done` / `failed`。
 3. App 用 Realtime 睇住張 table，搞掂即刻出播放器；播放用 signed URL。
 
@@ -36,8 +36,8 @@ Flutter app ──invoke──▶ Edge Function `generate-song` ──▶ AI mus
 |---|---|
 | Frontend | Flutter 3 · `provider` · `audioplayers` |
 | Auth | Supabase Auth — Google（web 用 implicit flow；native 用 deep link `net.toolution.happyfamilystudio://login-callback`）|
-| 權限 | `band_members` 白名單 + RLS。任何人都可以用 Google 登入，但唔係成員乜都睇唔到 |
-| AI | `supabase/functions/generate-song/providers/` — 一個 provider 一個檔案，用 `MUSIC_PROVIDER` secret 切換 |
+| 權限 | `core.app_members`（app id `studio`）+ RLS。任何人都可以用 Google 登入，但唔係成員乜都睇唔到 |
+| AI | `supabase/functions/studio-generate-song/providers/` — 一個 provider 一個檔案，用 `STUDIO_MUSIC_PROVIDER` secret 切換 |
 | Deploy | Cloudflare Pages（`.github/workflows/deploy.yml`）|
 
 ## AI 供應商
@@ -48,20 +48,20 @@ Flutter app ──invoke──▶ Edge Function `generate-song` ──▶ AI mus
 
 ## 第一次設定
 
-1. **Supabase**：project `ewvaukmegoyuvrtxvbhf`（TIO Studio Project，東京）。migration、成員名單、`generate-song` 已經 set 好；以下係由零開始嘅步驟。
+1. **Supabase**：用共用嘅 Tio Hub Project（`ddzwhmcxeokkwzmhglft`），規則睇 tio-ai-hub `docs/SHARED_DB.md`。
+   - SQL Editor 貼 `supabase/migrations/studio_0001_init.sql`，Run（可以重跑）；再跑 tio-ai-hub 嘅 `supabase/app-template/checks.sql`，要 0 行。
+   - Project Settings → Data API → Exposed schemas 加 `app_studio`。
+   - 三位成員各自登入 app 一次之後，SQL Editor 跑 `supabase/seed.sql`。
    ```sh
-   supabase link --project-ref <ref>
-   supabase db push                       # migrations/0001
-   # 喺 SQL editor 行一次 supabase/seed.sql（成員名單）
-   supabase secrets set ELEVENLABS_API_KEY=<key>
-   supabase functions deploy generate-song
+   supabase secrets set --project-ref ddzwhmcxeokkwzmhglft STUDIO_ELEVENLABS_API_KEY=<key>
+   supabase functions deploy studio-generate-song --project-ref ddzwhmcxeokkwzmhglft
    ```
-2. **Auth**：Supabase → Authentication → Providers 開 Google；
-   URL Configuration 加網頁網址同 `net.toolution.happyfamilystudio://login-callback`。
+2. **Auth**：Google 登入同 Hub 共用，唔使再開。URL Configuration → Redirect URLs 加 Studio 網頁網址同
+   `net.toolution.happyfamilystudio://login-callback`。
 3. **本機跑**：
    ```sh
    flutter run -d chrome \
-     --dart-define=SUPABASE_URL=https://<ref>.supabase.co \
+     --dart-define=SUPABASE_URL=https://ddzwhmcxeokkwzmhglft.supabase.co \
      --dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
    ```
 4. **Deploy**：開 Cloudflare Pages project `happy-family-studio`，加 repo secrets
@@ -72,7 +72,7 @@ Flutter app ──invoke──▶ Edge Function `generate-song` ──▶ AI mus
 
 ```sh
 flutter analyze && flutter test
-deno check supabase/functions/generate-song/index.ts && deno test supabase/functions/
+deno check supabase/functions/studio-generate-song/index.ts && deno test supabase/functions/
 ```
 
 ## 下一步（未做）

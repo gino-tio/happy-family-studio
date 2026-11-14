@@ -1,19 +1,23 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config.dart';
 import '../models/song.dart';
 
 class SongsService {
   final _client = Supabase.instance.client;
 
+  /// Tables of this app on the shared DB.
+  SupabaseQuerySchema get _db => _client.schema(Env.dbSchema);
+
   /// Newest first. Note: supabase-dart `.order()` defaults to descending —
   /// pass `ascending` explicitly (tio-help pitfall #8).
-  Stream<List<Song>> watchSongs() => _client
+  Stream<List<Song>> watchSongs() => _db
       .from('songs')
       .stream(primaryKey: ['id'])
       .order('created_at', ascending: false)
       .map((rows) => rows.map(Song.fromRow).toList());
 
-  Stream<Song?> watchSong(String id) => _client
+  Stream<Song?> watchSong(String id) => _db
       .from('songs')
       .stream(primaryKey: ['id'])
       .eq('id', id)
@@ -23,7 +27,7 @@ class SongsService {
   /// `generating`); the Edge Function finishes it in the background.
   Future<Song> generate(SongDraft draft) async {
     final res = await _client.functions.invoke(
-      'generate-song',
+      Env.generateSongFunction,
       body: draft.toJson(),
     );
     final data = res.data;
@@ -34,10 +38,10 @@ class SongsService {
   }
 
   Future<String> signedAudioUrl(String path) =>
-      _client.storage.from('songs').createSignedUrl(path, 60 * 60);
+      _client.storage.from(Env.songsBucket).createSignedUrl(path, 60 * 60);
 
   Future<void> rename(String id, String title) =>
-      _client.from('songs').update({'title': title}).eq('id', id);
+      _db.from('songs').update({'title': title}).eq('id', id);
 
-  Future<void> delete(String id) => _client.from('songs').delete().eq('id', id);
+  Future<void> delete(String id) => _db.from('songs').delete().eq('id', id);
 }

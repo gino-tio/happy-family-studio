@@ -1,29 +1,35 @@
-// generate-song — Supabase Edge Function (Deno).
+// studio-generate-song — Supabase Edge Function (Deno) on the shared Tio Hub project.
+// Shared-DB rules (tio-ai-hub docs/SHARED_DB.md): tables live in schema app_studio, the first
+// check is app_studio.me() with the caller's own token, secrets start with STUDIO_.
 //
 // The app never talks to the AI music vendor directly: the vendor key is a
 // Supabase secret (same proxy pattern as tio-help's `geocode`).
 //
 // Flow:
-//   1. Verify the caller is in band_members.
+//   1. Verify the caller is a member of the studio app (app_studio.me()).
 //   2. Insert a `songs` row (status 'generating') and return it at once.
 //   3. In the background (EdgeRuntime.waitUntil) call the provider, upload
-//      the audio to the private `songs` bucket and mark the row done/failed.
+//      the audio to the private `studio-songs` bucket and mark the row done/failed.
 //      The app sees the change over Realtime — generation takes 1–3 min,
 //      longer than we want an HTTP request held open.
 //
 // Request:  POST { title, style?, lyrics?, instrumental?, length_ms? }
-// Response: 202 { song: <row> } · 400 bad input · 403 not a band member
+// Response: 202 { song: <row> } · 400 bad input · 401 not signed in · 403 not a band member
 //
 // Secrets (supabase secrets set ...):
-//   ELEVENLABS_API_KEY   required while MUSIC_PROVIDER=elevenlabs
-//   MUSIC_PROVIDER       optional, default "elevenlabs"
-//   MUSIC_MODEL          optional, default "music_v1"
+//   STUDIO_ELEVENLABS_API_KEY   required while STUDIO_MUSIC_PROVIDER=elevenlabs
+//   STUDIO_MUSIC_PROVIDER       optional, default "elevenlabs"
+//   STUDIO_MUSIC_MODEL          optional, default "music_v1"
+// Every function in the Hub project can read every secret, hence the STUDIO_ prefix.
 // SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are injected
 // by the platform.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { elevenLabsProvider } from "./providers/elevenlabs.ts";
 import type { MusicProvider, SongRequest } from "./providers/types.ts";
+
+const SCHEMA = "app_studio";
+const BUCKET = "studio-songs";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -41,16 +47,16 @@ function json(status: number, body: unknown): Response {
 }
 
 function pickProvider(): MusicProvider {
-  const name = Deno.env.get("MUSIC_PROVIDER") ?? "elevenlabs";
-  const model = Deno.env.get("MUSIC_MODEL") ?? "music_v1";
+  const name = Deno.env.get("STUDIO_MUSIC_PROVIDER") ?? "elevenlabs";
+  const model = Deno.env.get("STUDIO_MUSIC_MODEL") ?? "music_v1";
   switch (name) {
     case "elevenlabs": {
-      const key = Deno.env.get("ELEVENLABS_API_KEY");
-      if (!key) throw new Error("ELEVENLABS_API_KEY is not set");
+      const key = Deno.env.get("STUDIO_ELEVENLABS_API_KEY");
+      if (!key) throw new Error("STUDIO_ELEVENLABS_API_KEY is not set");
       return elevenLabsProvider(key, model);
     }
     default:
-      throw new Error(`Unknown MUSIC_PROVIDER: ${name}`);
+      throw new Error(`Unknown STUDIO_MUSIC_PROVIDER: ${name}`);
   }
 }
 
@@ -77,18 +83,26 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "POST only" });
 
   const url = Deno.env.get("SUPABASE_URL")!;
+  const authHeader = req.headers.get("Authorization") ?? "";
+  if (!authHeader.startsWith("Bearer ")) return json(401, { error: "not signed in" });
   const userClient = createClient(url, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    global: { headers: { Authorization: authHeader } },
+    auth: { persistSession: false },
   });
-  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+    auth: { persistSession: false },
+  });
+  // Table access is pinned to this app's schema only (service role bypasses RLS).
+  const db = admin.schema(SCHEMA);
 
   const { data: userData } = await userClient.auth.getUser();
   const user = userData?.user;
   if (!user) return json(401, { error: "not signed in" });
 
-  const { data: isMember, error: memberErr } = await userClient.rpc("is_band_member");
-  if (memberErr) return json(500, { error: memberErr.message });
-  if (!isMember) return json(403, { error: "not a band member" });
+  // First check of every shared-DB function: the caller's role in this app, or null.
+  const { data: role, error: memberErr } = await userClient.schema(SCHEMA).rpc("me");
+  if (memberErr) return json(500, { error: "membership check failed" });
+  if (!role) return json(403, { error: "not a band member" });
 
   let parsed: SongRequest | string;
   try {
@@ -106,7 +120,7 @@ Deno.serve(async (req) => {
     return json(500, { error: (e as Error).message });
   }
 
-  const { data: song, error: insertErr } = await admin
+  const { data: song, error: insertErr } = await db
     .from("songs")
     .insert({
       created_by: user.id,
@@ -128,16 +142,16 @@ Deno.serve(async (req) => {
       const out = await provider.generate(songReq);
       const path = `${user.id}/${song.id}.${out.extension}`;
       const { error: upErr } = await admin.storage
-        .from("songs")
+        .from(BUCKET)
         .upload(path, out.audio, { contentType: out.contentType, upsert: true });
       if (upErr) throw upErr;
-      await admin.from("songs").update({
+      await db.from("songs").update({
         status: "done",
         audio_path: path,
         provider_song_id: out.providerSongId,
       }).eq("id", song.id);
     } catch (e) {
-      await admin.from("songs").update({
+      await db.from("songs").update({
         status: "failed",
         error: String((e as Error)?.message ?? e).slice(0, 1000),
       }).eq("id", song.id);

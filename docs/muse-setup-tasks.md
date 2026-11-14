@@ -1,5 +1,7 @@
 # Setup tasks for Muse 🤖
 
+> **2026-11-14: moved.** Studio now runs on the shared Tio Hub Project (`ddzwhmcxeokkwzmhglft`), see README「第一次設定」. The steps below are for the retired project and are kept only for history.
+
 > **To Muse:** these are dashboard settings for the Happy Family Studio app
 > (`gino-tio/happy-family-studio`). The code, database and Edge Function are
 > already live — only the four settings below are missing. Work through them

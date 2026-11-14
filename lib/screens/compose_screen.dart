@@ -7,7 +7,7 @@ import '../services/songs_service.dart';
 import '../theme.dart';
 import 'song_screen.dart';
 
-/// 作新歌 — title + style prompt + lyrics → generate-song Edge Function.
+/// 作新歌 — title + style prompt + lyrics → studio-generate-song Edge Function.
 class ComposeScreen extends StatefulWidget {
   const ComposeScreen({super.key, this.initialTitle, this.initialStyle});
 
