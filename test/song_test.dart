@@ -37,5 +37,6 @@ void main() {
     expect(json['title'], 't');
     expect(json['lyrics'], '');
     expect(json.containsKey('length_ms'), isFalse);
+    expect(json['provider'], 'elevenlabs');
   });
 }

@@ -70,6 +70,7 @@ class SongDraft {
     this.lyrics = '',
     this.instrumental = false,
     this.lengthMs,
+    this.provider = 'elevenlabs',
   });
 
   final String title;
@@ -78,11 +79,15 @@ class SongDraft {
   final bool instrumental;
   final int? lengthMs;
 
+  /// Which AI sings it: `elevenlabs` or `mureka` (see studio-generate-song).
+  final String provider;
+
   Map<String, dynamic> toJson() => {
     'title': title.trim(),
     'style': style.trim(),
     'lyrics': instrumental ? '' : lyrics.trim(),
     'instrumental': instrumental,
     if (lengthMs != null) 'length_ms': lengthMs,
+    'provider': provider,
   };
 }
