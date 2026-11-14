@@ -1,4 +1,4 @@
-// deno test supabase/functions/generate-song/index_test.ts
+// deno test supabase/functions/studio-generate-song/index_test.ts
 import { assertEquals } from "jsr:@std/assert@1";
 import { buildPrompt } from "./providers/elevenlabs.ts";
 

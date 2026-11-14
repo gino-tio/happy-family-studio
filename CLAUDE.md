@@ -7,10 +7,15 @@ in CI, `.order()` ascending, generic `set_updated_at` trigger).
 
 ## Live infra
 
-- **Supabase**: project "TIO Studio Project", ref `ewvaukmegoyuvrtxvbhf`, region Tokyo
-  (ap-northeast-1). URL `https://ewvaukmegoyuvrtxvbhf.supabase.co`. Migrations 0001–0002
-  applied; `generate-song` deployed (verify_jwt on); band_members seeded.
-- The `mcp__Supabase__*` connector is signed in to the account that owns this project.
+- **Supabase**: the shared **Tio Hub Project**, ref `ddzwhmcxeokkwzmhglft`, region Tokyo
+  (org "Tio Hub Org"; moved here 2026-11-14, Gino). URL `https://ddzwhmcxeokkwzmhglft.supabase.co`.
+  It follows tio-ai-hub `docs/SHARED_DB.md`: this app is app id `studio`, its tables live in
+  schema `app_studio`, membership is `core.app_members`, bucket `studio-songs`, Edge Function
+  `studio-generate-song`, secrets `STUDIO_*`. Hub and TIO Bot share the same project.
+- Live changes: Gino pastes SQL in the SQL Editor (connector writes don't reach him), then runs
+  tio-ai-hub `supabase/app-template/checks.sql` (must return 0 rows).
+- The old project "TIO Studio Project" (`ewvaukmegoyuvrtxvbhf`, never generated a song) is
+  retired; don't delete it until the app works on the Hub project.
 
 ## Status (2026-11-11) — handoff
 
@@ -18,13 +23,13 @@ Done: app scaffold, Supabase backend live, CI green, City Pop style preset, Beat
 sequencer (BeatScreen) with "用呢個 beat 作歌" → ComposeScreen(initialStyle: pattern.toPrompt()).
 
 Blocked on Gino (dashboard work, see `docs/muse-setup-tasks.md`): Google provider, redirect
-URLs, `ELEVENLABS_API_KEY` secret, GitHub Actions secrets. No song has been generated yet;
+URLs, `STUDIO_ELEVENLABS_API_KEY` secret, GitHub Actions secrets (now on the Hub project; docs/muse-setup-tasks.md still names the old one). No song has been generated yet;
 Cantonese vocal quality untested. Web hosting (Cloudflare Pages) not set up.
 
 Not yet verified by ear on a device: beat loop playback through `audioplayers` BytesSource
 (web may leave a tiny gap at the WAV loop point; the file holds 2 loops to halve it).
 
-Beat grid next ideas: save/share patterns (new `beats` table + RLS via is_band_member),
+Beat grid next ideas: save/share patterns (new `beats` table in app_studio + RLS via core.is_member('studio')),
 per-step velocity, >2 bars, sample-based instruments.
 
 ## Beat grid notes
@@ -39,16 +44,18 @@ per-step velocity, >2 bars, sample-based instruments.
 
 ## Invariants
 
-- **Vendor keys never reach the client.** Only `generate-song` talks to the AI
+- **Vendor keys never reach the client.** Only `studio-generate-song` talks to the AI
   music API; keys are Supabase secrets.
 - **Membership, not sign-in, is the gate.** Every RLS policy checks
-  `public.is_band_member()`; Google sign-in alone grants nothing.
+  `core.is_member('studio')`; the app asks `app_studio.me()`. Google sign-in alone grants
+  nothing (and the sign-in is shared with every app on the Hub project).
+- **Never add tables to `public`**; everything goes in `app_studio` (exposed in Data API).
 - **Writes to `songs.status` / `audio_path` come only from the Edge Function**
   (service role). Clients may only rename / delete their own rows.
 - **`Song.fromRow`** is the one parser for selects, Realtime and the function response.
 - **Design tokens** live in `lib/theme.dart` (`StudioColors` / `StudioRadius` / `StudioSpacing`).
-- **Separate Supabase project** from tio-help and tio-info — never run this
-  repo's SQL against theirs.
+- **Migrations touch only Studio's things**: `app_studio`, `studio-*` buckets, `studio_*`
+  storage policies, `core` rows for app id `studio`. Never Hub/Bot tables or other apps.
 
 ## Layout
 
@@ -57,11 +64,11 @@ lib/models/        Song, SongDraft, SongStatus, StylePreset; BeatPattern, BeatTr
 lib/audio/         BeatSynth — pure-Dart synth: BeatPattern → WAV loop (sample-exact timing, swing)
 lib/services/      AuthService (Google + allowlist), SongsService (stream, generate, signed URLs)
 lib/screens/       AuthGate → SignIn / Library → Compose → Song (player); Library → BeatScreen (step sequencer)
-supabase/migrations/0001_initial_schema.sql   band_members, songs, songs bucket, RLS
-supabase/functions/generate-song/             Edge Function + providers/
-supabase/seed.sql  band allowlist (Gino, Vicky, Ding Ding)
+supabase/migrations/studio_0001_init.sql      app_studio schema, songs, studio-songs bucket, RLS
+supabase/functions/studio-generate-song/      Edge Function + providers/
+supabase/seed.sql  band membership (Gino owner, Vicky, Ding Ding) after they sign in once
 ```
 
 ## Checks
 
-`flutter analyze && flutter test` · `deno check supabase/functions/generate-song/index.ts && deno test supabase/functions/`
+`flutter analyze && flutter test` · `deno check supabase/functions/studio-generate-song/index.ts && deno test supabase/functions/`

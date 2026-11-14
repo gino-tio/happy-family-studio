@@ -2,5 +2,5 @@
 #   supabase link --project-ref <ref>
 project_id = "happy-family-studio"
 
-[functions.generate-song]
+[functions.studio-generate-song]
 verify_jwt = true

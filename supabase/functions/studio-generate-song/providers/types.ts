@@ -1,7 +1,7 @@
 // A music provider turns a request into audio bytes. Each provider lives in
 // its own file so swapping vendors (ElevenLabs today; Suno if its official
 // API opens up, a self-hosted model later) is a one-file change plus a
-// MUSIC_PROVIDER secret flip.
+// STUDIO_MUSIC_PROVIDER secret flip.
 
 export interface SongRequest {
   title: string;
