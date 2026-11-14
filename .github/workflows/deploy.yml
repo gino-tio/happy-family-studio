@@ -9,7 +9,8 @@ name: Deploy web to Cloudflare Pages
 #   SUPABASE_PUBLISHABLE_KEY   publishable (public) key — safe in the bundle
 #
 # Every --dart-define used locally must also be passed here (tio-help
-# pitfall #4). The Pages project must already exist as "happy-family-studio".
+# pitfall #4). The Pages project "happy-family-studio" and its custom domain
+# studio.toolution.net are created here if missing, so no dashboard step is needed.
 # Skipped until the Cloudflare secrets exist so a fresh repo stays green.
 
 on:
@@ -40,9 +41,36 @@ jobs:
           flutter build web --release
           --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           --dart-define=SUPABASE_PUBLISHABLE_KEY=${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-      - if: env.HAS_CF == 'true'
+      # Already exists = harmless error.
+      - name: Create Pages project if missing
+        if: env.HAS_CF == 'true'
+        continue-on-error: true
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create happy-family-studio --production-branch=main
+      - name: Deploy to Cloudflare Pages
+        if: env.HAS_CF == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy build/web --project-name=happy-family-studio --branch=main
+      # Attaching a domain that is already attached is a harmless error. If the
+      # toolution.net zone is in this Cloudflare account, Cloudflare adds the DNS
+      # record; otherwise it stays "pending" until a CNAME
+      # studio -> happy-family-studio.pages.dev exists.
+      - name: Attach custom domain studio.toolution.net
+        if: env.HAS_CF == 'true'
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: happy-family-studio
+          DOMAIN: studio.toolution.net
+        run: |
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/domains"
+          curl -sS -X POST "$api" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' --data "{\"name\":\"$DOMAIN\"}" \
+            | jq -c '{success, errors: [.errors[]?.message]}'
