@@ -176,7 +176,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
             SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'elevenlabs', label: Text('ElevenLabs')),
-                ButtonSegment(value: 'mureka', label: Text('Mureka（試廣東話）')),
+                ButtonSegment(
+                  value: 'musicgpt',
+                  label: Text('MusicGPT（廣東話・兩個版本）'),
+                ),
               ],
               selected: {_provider},
               onSelectionChanged: (v) => setState(() => _provider = v.first),

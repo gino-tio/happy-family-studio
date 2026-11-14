@@ -79,7 +79,7 @@ class SongDraft {
   final bool instrumental;
   final int? lengthMs;
 
-  /// Which AI sings it: `elevenlabs` or `mureka` (see studio-generate-song).
+  /// Which AI sings it: `elevenlabs` or `musicgpt` (see studio-generate-song).
   final String provider;
 
   Map<String, dynamic> toJson() => {

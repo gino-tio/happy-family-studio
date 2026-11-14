@@ -7,3 +7,6 @@ verify_jwt = true
 
 [functions.studio-write-lyrics]
 verify_jwt = true
+
+[functions.studio-musicgpt-hook]
+verify_jwt = false
