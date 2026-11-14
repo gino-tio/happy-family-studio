@@ -29,6 +29,9 @@ jobs:
         if: env.HAS_CF == 'true'
         with:
           channel: stable
+          # Pinned: 3.50 deprecates package:flutter/material.dart (move to
+          # package:material_ui is its own change). Bump on purpose.
+          flutter-version: 3.47.9
           cache: true
       - if: env.HAS_CF == 'true'
         run: flutter pub get
