@@ -41,6 +41,10 @@ jobs:
           flutter build web --release
           --dart-define=SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           --dart-define=SUPABASE_PUBLISHABLE_KEY=${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      # New JS and font file names per deploy: the toolution.net zone caches them for
+      # 4 hours, so without this a deploy took hours to reach browsers (as in tio-bot).
+      - if: env.HAS_CF == 'true'
+        run: tool/version_web.sh build/web "${GITHUB_SHA::8}"
       # Already exists = harmless error.
       - name: Create Pages project if missing
         if: env.HAS_CF == 'true'
