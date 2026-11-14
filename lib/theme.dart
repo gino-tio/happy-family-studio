@@ -8,9 +8,10 @@ class StudioColors {
   static const teal = Color(0xFF2EC4B6);
   static const brass = Color(0xFFFF8A3D); // horns row in the beat grid
   static const error = Color(0xFFE53935);
-  static const background = Color(0xFF14121A);
-  static const surface = Color(0xFF1F1C27);
-  static const surfaceHigh = Color(0xFF2A2634);
+  static const background = Color(0xFF0E0D12); // near-black stage
+  static const surface = Color(0xFF19171F);
+  static const surfaceHigh = Color(0xFF25222D);
+  static const glass = Color(0xCC17151D); // mini player and panels over covers
   static const textPrimary = Color(0xFFF5F3F7);
   static const textSecondary = Color(0xFFA9A3B5);
   static const divider = Color(0xFF3A3545);
@@ -20,6 +21,8 @@ class StudioRadius {
   static const card = 16.0;
   static const input = 12.0;
   static const pill = 999.0;
+  static const cover = 12.0;
+  static const panel = 20.0;
 }
 
 class StudioSpacing {
@@ -73,5 +76,30 @@ ThemeData buildStudioTheme() {
       ),
     ),
     dividerColor: StudioColors.divider,
+    appBarTheme: const AppBarTheme(
+      backgroundColor: StudioColors.background,
+      surfaceTintColor: Colors.transparent,
+      centerTitle: false,
+    ),
+    tabBarTheme: const TabBarThemeData(
+      labelColor: StudioColors.textPrimary,
+      unselectedLabelColor: StudioColors.textSecondary,
+      indicatorColor: StudioColors.neon,
+      dividerColor: Colors.transparent,
+      tabAlignment: TabAlignment.start,
+      labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+    ),
+    sliderTheme: const SliderThemeData(
+      trackHeight: 3,
+      activeTrackColor: StudioColors.textPrimary,
+      inactiveTrackColor: StudioColors.divider,
+      thumbColor: StudioColors.textPrimary,
+      overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+    ),
+    bottomSheetTheme: const BottomSheetThemeData(
+      backgroundColor: StudioColors.surface,
+      surfaceTintColor: Colors.transparent,
+    ),
   );
 }

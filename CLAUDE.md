@@ -42,6 +42,25 @@ per-step velocity, >2 bars, sample-based instruments.
 - One chord per half bar (`BeatPattern.stepsPerChord = 8`). `chord.dart` parses the
   symbols a band chart uses; extend `_qualities` for more.
 
+## Player redesign (2026-11-14, Gino: "like musicgpt.com", all recommended answers)
+
+- Home = rows of big covers (最新作品, 我鍾意, Playlists, 我嘅歌) + full track list; a mini player sits
+  under every screen (MaterialApp.builder, outside the navigator) with prev/next/shuffle/repeat.
+  Song screen = big cover + controls + tabs 歌詞 / 留言 / 資料; wide screens put the cover left.
+- Covers (`songs.cover_path`, private bucket `studio-covers`): MusicGPT songs ask for
+  `generate_album_cover` and keep MusicGPT's .jpg; others (and 換封面, any member, 10/day as
+  ai_usage kind `cover`) get an SVG Claude draws via the Hub chat (`_shared/cover.ts`,
+  `sanitizeSvg` rebuilds it from allowed shapes only). `studio-song-cover` draws in the background
+  (202); with the service role and `auto: true` it only fills a song that has no cover.
+- Timed lyrics (`songs.lyrics_timed`, [{start,end,text}] ms) from MusicGPT `lyrics_timestamps`;
+  the app highlights the sung line. `enrichMusicGpt` fills cover/lyrics that arrive after the audio.
+- Likes, comments (one level of replies), playlists (everyone plays, only the maker edits) and
+  `members()` (names/avatars): migration studio_0003_player, test supabase/tests/studio_player_rls_test.sql.
+- `LibraryStore` holds songs/likes/playlists/members for the whole app; `PlayerController` is the
+  one AudioPlayer. `LibraryStore.seed` fills it without a backend (design previews, widget tests).
+- Live changes are now applied from cloud sessions with `SUPABASE_ACCESS_TOKEN` (Management API SQL,
+  `npx supabase functions deploy <fn> --project-ref ddzwhmcxeokkwzmhglft --use-api --yes`).
+
 ## Invariants
 
 - **AI lyrics go through the Hub.** `studio-write-lyrics` calls `POST <hub>/api/v1/llm/studio/chat`
@@ -73,10 +92,14 @@ per-step velocity, >2 bars, sample-based instruments.
 lib/models/        Song, SongDraft, SongStatus, StylePreset; BeatPattern, BeatTrack, BeatPresets, chord.dart
 lib/audio/         BeatSynth — pure-Dart synth: BeatPattern → WAV loop (sample-exact timing, swing)
 lib/services/      AuthService (Google + allowlist), SongsService (stream, generate, signed URLs)
-lib/screens/       AuthGate → SignIn / Library → Compose → Song (player); Library → BeatScreen (step sequencer)
+lib/services/      + LibraryStore (live library), PlayerController (queue player)
+lib/widgets/       CoverArt, MiniPlayer/PlayerControls, LyricsView, CommentsView, song cards + playlist sheet
+lib/screens/       AuthGate → SignIn / Home → Song / Playlist / Compose; Home → BeatScreen (step sequencer)
 supabase/migrations/studio_0001_init.sql      app_studio schema, songs, studio-songs bucket, RLS
 supabase/functions/studio-generate-song/      Edge Function + providers/
 supabase/functions/studio-musicgpt-hook/      MusicGPT webhook → finishMusicGpt
+supabase/functions/studio-song-cover/         換封面 / auto cover (Claude SVG via Hub; MusicGPT cover first)
+supabase/functions/_shared/cover.ts           cover prompt, sanitizeSvg, storeCover
 supabase/functions/studio-write-lyrics/       AI 寫歌詞: Claude via TIO AI Hub chat (app `studio`, chat only), 30/member/HK day in app_studio.ai_usage
 supabase/seed.sql  band membership (Gino owner, Vicky, Ding Ding) after they sign in once
 ```
