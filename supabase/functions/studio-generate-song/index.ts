@@ -20,12 +20,16 @@
 //   STUDIO_ELEVENLABS_API_KEY   required while STUDIO_MUSIC_PROVIDER=elevenlabs
 //   STUDIO_MUSIC_PROVIDER       optional, default "elevenlabs"
 //   STUDIO_MUSIC_MODEL          optional, default "music_v1"
+//   STUDIO_FAL_KEY              required for provider "mureka" (Mureka through fal.ai)
+//   STUDIO_MUREKA_MODEL         optional, default "mureka-9.5"
+// The app may pick the provider per song (request field `provider`).
 // Every function in the Hub project can read every secret, hence the STUDIO_ prefix.
 // SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are injected
 // by the platform.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { elevenLabsProvider } from "./providers/elevenlabs.ts";
+import { murekaProvider } from "./providers/mureka.ts";
 import type { MusicProvider, SongRequest } from "./providers/types.ts";
 
 const SCHEMA = "app_studio";
@@ -46,14 +50,20 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-function pickProvider(): MusicProvider {
-  const name = Deno.env.get("STUDIO_MUSIC_PROVIDER") ?? "elevenlabs";
-  const model = Deno.env.get("STUDIO_MUSIC_MODEL") ?? "music_v1";
+export const PROVIDERS = ["elevenlabs", "mureka"];
+
+function pickProvider(requested: string): MusicProvider {
+  const name = requested || (Deno.env.get("STUDIO_MUSIC_PROVIDER") ?? "elevenlabs");
   switch (name) {
     case "elevenlabs": {
       const key = Deno.env.get("STUDIO_ELEVENLABS_API_KEY");
       if (!key) throw new Error("STUDIO_ELEVENLABS_API_KEY is not set");
-      return elevenLabsProvider(key, model);
+      return elevenLabsProvider(key, Deno.env.get("STUDIO_MUSIC_MODEL") ?? "music_v1");
+    }
+    case "mureka": {
+      const key = Deno.env.get("STUDIO_FAL_KEY");
+      if (!key) throw new Error("Mureka 未設定（缺 STUDIO_FAL_KEY）");
+      return murekaProvider(key, Deno.env.get("STUDIO_MUREKA_MODEL") ?? "mureka-9.5");
     }
     default:
       throw new Error(`Unknown STUDIO_MUSIC_PROVIDER: ${name}`);
@@ -68,6 +78,8 @@ export function parseRequest(raw: unknown): SongRequest | string {
   const lyrics = typeof b.lyrics === "string" ? b.lyrics : "";
   const instrumental = b.instrumental === true;
   const lengthMs = typeof b.length_ms === "number" ? Math.round(b.length_ms) : null;
+  const provider = typeof b.provider === "string" ? b.provider : "";
+  if (provider && !PROVIDERS.includes(provider)) return "unknown provider";
   if (!title || title.length > 120) return "title is required (1–120 chars)";
   if (style.length > 1000) return "style is too long (max 1000 chars)";
   if (lyrics.length > 6000) return "lyrics are too long (max 6000 chars)";
@@ -75,7 +87,7 @@ export function parseRequest(raw: unknown): SongRequest | string {
   if (lengthMs !== null && (lengthMs < 10000 || lengthMs > 300000)) {
     return "length_ms must be between 10000 and 300000";
   }
-  return { title, style, lyrics, instrumental, lengthMs };
+  return { title, style, lyrics, instrumental, lengthMs, provider };
 }
 
 Deno.serve(async (req) => {
@@ -115,7 +127,7 @@ Deno.serve(async (req) => {
 
   let provider: MusicProvider;
   try {
-    provider = pickProvider();
+    provider = pickProvider(songReq.provider);
   } catch (e) {
     return json(500, { error: (e as Error).message });
   }

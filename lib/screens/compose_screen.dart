@@ -25,6 +25,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
   late final _style = TextEditingController(text: widget.initialStyle);
   final _lyrics = TextEditingController();
   bool _instrumental = false;
+  String _provider = 'elevenlabs';
   double _seconds = 120;
   bool _busy = false;
   bool _writing = false;
@@ -48,6 +49,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
           lyrics: _lyrics.text,
           instrumental: _instrumental,
           lengthMs: (_seconds * 1000).round(),
+          provider: _provider,
         ),
       );
       if (!mounted) return;
@@ -168,6 +170,17 @@ class _ComposeScreenState extends State<ComposeScreen> {
                   alignLabelWithHint: true,
                 ),
               ),
+            const SizedBox(height: StudioSpacing.md),
+            const Text('邊個 AI 作曲'),
+            const SizedBox(height: StudioSpacing.sm),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'elevenlabs', label: Text('ElevenLabs')),
+                ButtonSegment(value: 'mureka', label: Text('Mureka（試廣東話）')),
+              ],
+              selected: {_provider},
+              onSelectionChanged: (v) => setState(() => _provider = v.first),
+            ),
             const SizedBox(height: StudioSpacing.md),
             Text('長度：${_seconds.round()} 秒'),
             Slider(

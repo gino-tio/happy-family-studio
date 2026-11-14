@@ -47,6 +47,10 @@ per-step velocity, >2 bars, sample-based instruments.
 - **AI lyrics go through the Hub.** `studio-write-lyrics` calls `POST <hub>/api/v1/llm/studio/chat`
   with secret `STUDIO_HUB_API_KEY` (portal key kind `app`, Hub app `studio` is chat only via
   `HUB_CHAT_APPS`). Topic and lyrics are never logged. Quota rows are inserted before the call.
+- **Two singers.** ElevenLabs sings Chinese lyrics in Mandarin (no Cantonese on its list), so
+  the compose screen also offers Mureka through fal.ai (`providers/mureka.ts`, secret
+  `STUDIO_FAL_KEY`, queue + polling inside the 150 s background limit). Cantonese on Mureka is
+  undocumented; judge by ear.
 - **Vendor keys never reach the client.** Only `studio-generate-song` talks to the AI
   music API; keys are Supabase secrets.
 - **Membership, not sign-in, is the gate.** Every RLS policy checks
