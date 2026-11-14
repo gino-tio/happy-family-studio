@@ -27,6 +27,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
   bool _instrumental = false;
   double _seconds = 120;
   bool _busy = false;
+  bool _writing = false;
 
   @override
   void dispose() {
@@ -58,6 +59,36 @@ class _ComposeScreenState extends State<ComposeScreen> {
       setState(() => _busy = false);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('生成失敗：$e')));
+    }
+  }
+
+  /// 「AI 寫歌詞」: ask what the song is about, then fill the lyrics (and the
+  /// title if it is empty) with what AI writes. The member edits it after.
+  Future<void> _aiLyrics() async {
+    final topic = await showDialog<String>(
+      context: context,
+      builder: (_) => const _TopicDialog(),
+    );
+    if (topic == null || topic.trim().isEmpty || !mounted) return;
+    setState(() => _writing = true);
+    try {
+      final r = await context.read<SongsService>().writeLyrics(
+        topic: topic.trim(),
+        style: _style.text,
+        title: _title.text.trim(),
+        seconds: _seconds.round(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _lyrics.text = r.lyrics;
+        if (_title.text.trim().isEmpty) _title.text = r.title;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } finally {
+      if (mounted) setState(() => _writing = false);
     }
   }
 
@@ -111,6 +142,21 @@ class _ComposeScreenState extends State<ComposeScreen> {
               onChanged: (v) => setState(() => _instrumental = v),
             ),
             if (!_instrumental)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _writing || _busy ? null : _aiLyrics,
+                  icon: _writing
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.edit_note),
+                  label: Text(_writing ? 'AI 寫緊…（大約半分鐘）' : 'AI 寫歌詞'),
+                ),
+              ),
+            if (!_instrumental) const SizedBox(height: StudioSpacing.sm),
+            if (!_instrumental)
               TextFormField(
                 controller: _lyrics,
                 maxLength: 6000,
@@ -146,6 +192,53 @@ class _ComposeScreenState extends State<ComposeScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Asks what the song is about, in the member's own words.
+class _TopicDialog extends StatefulWidget {
+  const _TopicDialog();
+
+  @override
+  State<_TopicDialog> createState() => _TopicDialogState();
+}
+
+class _TopicDialogState extends State<_TopicDialog> {
+  final _topic = TextEditingController();
+
+  @override
+  void dispose() {
+    _topic.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('AI 寫歌詞'),
+      content: TextField(
+        controller: _topic,
+        autofocus: true,
+        maxLength: 500,
+        minLines: 3,
+        maxLines: 6,
+        decoration: const InputDecoration(
+          labelText: '首歌講咩？咩感覺？',
+          hintText: '例如：叮叮第一日返學，有啲驚又有啲興奮，溫暖少少搞笑',
+          alignLabelWithHint: true,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _topic.text),
+          child: const Text('寫'),
+        ),
+      ],
     );
   }
 }

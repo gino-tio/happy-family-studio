@@ -44,6 +44,9 @@ per-step velocity, >2 bars, sample-based instruments.
 
 ## Invariants
 
+- **AI lyrics go through the Hub.** `studio-write-lyrics` calls `POST <hub>/api/v1/llm/studio/chat`
+  with secret `STUDIO_HUB_API_KEY` (portal key kind `app`, Hub app `studio` is chat only via
+  `HUB_CHAT_APPS`). Topic and lyrics are never logged. Quota rows are inserted before the call.
 - **Vendor keys never reach the client.** Only `studio-generate-song` talks to the AI
   music API; keys are Supabase secrets.
 - **Membership, not sign-in, is the gate.** Every RLS policy checks
@@ -66,9 +69,10 @@ lib/services/      AuthService (Google + allowlist), SongsService (stream, gener
 lib/screens/       AuthGate → SignIn / Library → Compose → Song (player); Library → BeatScreen (step sequencer)
 supabase/migrations/studio_0001_init.sql      app_studio schema, songs, studio-songs bucket, RLS
 supabase/functions/studio-generate-song/      Edge Function + providers/
+supabase/functions/studio-write-lyrics/       AI 寫歌詞: Claude via TIO AI Hub chat (app `studio`, chat only), 30/member/HK day in app_studio.ai_usage
 supabase/seed.sql  band membership (Gino owner, Vicky, Ding Ding) after they sign in once
 ```
 
 ## Checks
 
-`flutter analyze && flutter test` · `deno check supabase/functions/studio-generate-song/index.ts && deno test supabase/functions/`
+`flutter analyze && flutter test` · `deno check supabase/functions/*/index.ts && deno test supabase/functions/`

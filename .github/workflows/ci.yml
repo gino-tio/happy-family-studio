@@ -29,5 +29,5 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - run: deno check supabase/functions/studio-generate-song/index.ts
+      - run: deno check supabase/functions/studio-generate-song/index.ts supabase/functions/studio-write-lyrics/index.ts
       - run: deno test supabase/functions/

@@ -37,6 +37,40 @@ class SongsService {
     throw Exception('Unexpected response: $data');
   }
 
+  /// Asks AI for Cantonese lyrics. Returns (title, lyrics); throws with the
+  /// function's own message (e.g. the daily limit) when it can't.
+  Future<({String title, String lyrics})> writeLyrics({
+    required String topic,
+    required String style,
+    required String title,
+    required int seconds,
+  }) async {
+    try {
+      final res = await _client.functions.invoke(
+        Env.writeLyricsFunction,
+        body: {
+          'topic': topic,
+          'style': style,
+          'title': title,
+          'seconds': seconds,
+        },
+      );
+      final data = res.data;
+      if (data is Map && data['lyrics'] is String) {
+        return (
+          title: (data['title'] ?? '') as String,
+          lyrics: data['lyrics'] as String,
+        );
+      }
+      throw Exception('Unexpected response');
+    } on FunctionException catch (e) {
+      final d = e.details;
+      throw Exception(
+        d is Map && d['error'] is String ? d['error'] : 'AI 寫唔到，遲啲再試',
+      );
+    }
+  }
+
   Future<String> signedAudioUrl(String path) =>
       _client.storage.from(Env.songsBucket).createSignedUrl(path, 60 * 60);
 

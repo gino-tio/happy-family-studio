@@ -4,3 +4,6 @@ project_id = "happy-family-studio"
 
 [functions.studio-generate-song]
 verify_jwt = true
+
+[functions.studio-write-lyrics]
+verify_jwt = true
