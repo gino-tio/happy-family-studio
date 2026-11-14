@@ -1,7 +1,7 @@
 // deno test supabase/functions/studio-generate-song/index_test.ts
 import { assertEquals } from "jsr:@std/assert@1";
 import { buildPrompt } from "./providers/elevenlabs.ts";
-import { murekaBody } from "./providers/mureka.ts";
+import { musicgptBody, parseByIdReply } from "./providers/musicgpt.ts";
 
 Deno.test("buildPrompt drops lyrics for instrumentals", () => {
   const p = buildPrompt({
@@ -18,21 +18,26 @@ Deno.test("buildPrompt includes lyrics after style", () => {
   assertEquals(p.endsWith("星期六 星期六"), true);
 });
 
-Deno.test("murekaBody asks for Cantonese and keeps the style under 1,024 chars", () => {
-  const b = murekaBody({
-    title: "t", style: "x".repeat(2000), lyrics: "[Verse]\n星期六", instrumental: false, lengthMs: 60000, provider: "mureka",
-  }, "mureka-9.5");
-  assertEquals((b.prompt as string).startsWith("Vocals sung in Cantonese"), true);
-  assertEquals((b.prompt as string).length, 1024);
-  assertEquals(b.lyrics, "[Verse]\n星期六");
-  assertEquals(b.duration, undefined); // under 120 s: the model decides
+
+
+Deno.test("musicgptBody asks for Cantonese, picks the voice from the style, adds the webhook", () => {
+  const b = musicgptBody({
+    title: "海邊", style: "City Pop, female vocal", lyrics: "[Verse]\n浪花", instrumental: false, lengthMs: 60000, provider: "musicgpt",
+  }, "v6", "https://x.supabase.co/functions/v1/studio-musicgpt-hook");
+  assertEquals((b.prompt as string).startsWith("Cantonese (Hong Kong Cantopop) vocals"), true);
+  assertEquals(b.gender, "female");
+  assertEquals(b.lyrics, "[Verse]\n浪花");
+  assertEquals(b.make_instrumental, false);
+  assertEquals(b.webhook_url, "https://x.supabase.co/functions/v1/studio-musicgpt-hook");
 });
 
-Deno.test("murekaBody: instrumental has no lyrics; duration only for 9.5 and 120–300 s", () => {
-  const req = { title: "t", style: "lofi", lyrics: "唔好唱", instrumental: true, lengthMs: 400000, provider: "mureka" };
-  const b = murekaBody(req, "mureka-9.5");
-  assertEquals(b.lyrics, undefined);
-  assertEquals(b.prompt, "Instrumental only, no vocals. lofi");
-  assertEquals(b.duration, 300);
-  assertEquals(murekaBody(req, "mureka-9").duration, undefined);
+Deno.test("parseByIdReply reads both documented shapes", () => {
+  assertEquals(parseByIdReply({ conversion: { status: "IN_QUEUE" } }), { state: "pending" });
+  assertEquals(parseByIdReply({ conversion: { status: "FAILED", status_msg: "flagged" } }), { state: "failed", error: "flagged" });
+  assertEquals(
+    parseByIdReply({ conversion: { status: "COMPLETED", conversion_path_1: "https://c/a.mp3", conversion_path_2: "https://c/b.mp3" } }),
+    { state: "done", urls: ["https://c/a.mp3", "https://c/b.mp3"] },
+  );
+  assertEquals(parseByIdReply({ conversion: { status: "COMPLETED", audio_url: "https://c/a.mp3" } }), { state: "done", urls: ["https://c/a.mp3"] });
+  assertEquals(parseByIdReply({ conversion: { status: "COMPLETED" } }), { state: "pending" });
 });

@@ -20,8 +20,9 @@
 //   STUDIO_ELEVENLABS_API_KEY   required while STUDIO_MUSIC_PROVIDER=elevenlabs
 //   STUDIO_MUSIC_PROVIDER       optional, default "elevenlabs"
 //   STUDIO_MUSIC_MODEL          optional, default "music_v1"
-//   STUDIO_FAL_KEY              required for provider "mureka" (Mureka through fal.ai)
-//   STUDIO_MUREKA_MODEL         optional, default "mureka-9.5"
+//   STUDIO_MUSICGPT_KEY         required for provider "musicgpt" (async: task + webhook
+//                               studio-musicgpt-hook + polling here, two versions per song)
+//   STUDIO_MUSICGPT_MODEL       optional, default "v6"
 // The app may pick the provider per song (request field `provider`).
 // Every function in the Hub project can read every secret, hence the STUDIO_ prefix.
 // SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are injected
@@ -29,7 +30,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { elevenLabsProvider } from "./providers/elevenlabs.ts";
-import { murekaProvider } from "./providers/mureka.ts";
+import { finishMusicGpt, musicgptBody, submitMusicGpt } from "./providers/musicgpt.ts";
 import type { MusicProvider, SongRequest } from "./providers/types.ts";
 
 const SCHEMA = "app_studio";
@@ -50,7 +51,7 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-export const PROVIDERS = ["elevenlabs", "mureka"];
+export const PROVIDERS = ["elevenlabs", "musicgpt"];
 
 function pickProvider(requested: string): MusicProvider {
   const name = requested || (Deno.env.get("STUDIO_MUSIC_PROVIDER") ?? "elevenlabs");
@@ -59,11 +60,6 @@ function pickProvider(requested: string): MusicProvider {
       const key = Deno.env.get("STUDIO_ELEVENLABS_API_KEY");
       if (!key) throw new Error("STUDIO_ELEVENLABS_API_KEY is not set");
       return elevenLabsProvider(key, Deno.env.get("STUDIO_MUSIC_MODEL") ?? "music_v1");
-    }
-    case "mureka": {
-      const key = Deno.env.get("STUDIO_FAL_KEY");
-      if (!key) throw new Error("Mureka 未設定（缺 STUDIO_FAL_KEY）");
-      return murekaProvider(key, Deno.env.get("STUDIO_MUREKA_MODEL") ?? "mureka-9.5");
     }
     default:
       throw new Error(`Unknown STUDIO_MUSIC_PROVIDER: ${name}`);
@@ -124,6 +120,44 @@ Deno.serve(async (req) => {
   }
   if (typeof parsed === "string") return json(400, { error: parsed });
   const songReq = parsed;
+
+  if (songReq.provider === "musicgpt") {
+    const key = Deno.env.get("STUDIO_MUSICGPT_KEY");
+    if (!key) return json(500, { error: "MusicGPT 未設定（缺 STUDIO_MUSICGPT_KEY）" });
+    const model = Deno.env.get("STUDIO_MUSICGPT_MODEL") ?? "v6";
+    let taskId: string;
+    try {
+      taskId = await submitMusicGpt(key, musicgptBody(songReq, model, `${url}/functions/v1/studio-musicgpt-hook`));
+    } catch (e) {
+      return json(502, { error: (e as Error).message });
+    }
+    const { data: song, error: insertErr } = await db.from("songs").insert({
+      created_by: user.id,
+      title: songReq.title,
+      style: songReq.style,
+      lyrics: songReq.lyrics,
+      instrumental: songReq.instrumental,
+      length_ms: songReq.lengthMs,
+      provider: "musicgpt",
+      model,
+      status: "generating",
+      provider_song_id: taskId,
+    }).select().single();
+    if (insertErr) return json(500, { error: insertErr.message });
+    // Poll while this worker lives (150 s); the webhook finishes it if it takes longer.
+    EdgeRuntime.waitUntil((async () => {
+      const started = Date.now();
+      while (Date.now() - started < 135_000) {
+        await new Promise((r) => setTimeout(r, 10_000));
+        try {
+          if ((await finishMusicGpt(admin, SCHEMA, BUCKET, key, taskId)) !== "pending") return;
+        } catch (e) {
+          console.error("musicgpt finish failed", (e as Error).message);
+        }
+      }
+    })());
+    return json(202, { song });
+  }
 
   let provider: MusicProvider;
   try {

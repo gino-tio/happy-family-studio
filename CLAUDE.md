@@ -48,9 +48,12 @@ per-step velocity, >2 bars, sample-based instruments.
   with secret `STUDIO_HUB_API_KEY` (portal key kind `app`, Hub app `studio` is chat only via
   `HUB_CHAT_APPS`). Topic and lyrics are never logged. Quota rows are inserted before the call.
 - **Two singers.** ElevenLabs sings Chinese lyrics in Mandarin (no Cantonese on its list), so
-  the compose screen also offers Mureka through fal.ai (`providers/mureka.ts`, secret
-  `STUDIO_FAL_KEY`, queue + polling inside the 150 s background limit). Cantonese on Mureka is
-  undocumented; judge by ear.
+  the compose screen also offers MusicGPT (`providers/musicgpt.ts`, secret `STUDIO_MUSICGPT_KEY`,
+  model `STUDIO_MUSICGPT_MODEL` default v6), Gino's pick 2026-11-14 after hearing it on
+  musicgpt.com. Async: the song row keeps the task id in `provider_song_id`; the generate
+  function polls ~135 s and `studio-musicgpt-hook` (verify_jwt off, unsigned webhook = nudge only,
+  result re-read from MusicGPT with our key) finishes later ones. Version 2 becomes a second row
+  "<title> (v2)".
 - **Vendor keys never reach the client.** Only `studio-generate-song` talks to the AI
   music API; keys are Supabase secrets.
 - **Membership, not sign-in, is the gate.** Every RLS policy checks
@@ -73,6 +76,7 @@ lib/services/      AuthService (Google + allowlist), SongsService (stream, gener
 lib/screens/       AuthGate → SignIn / Library → Compose → Song (player); Library → BeatScreen (step sequencer)
 supabase/migrations/studio_0001_init.sql      app_studio schema, songs, studio-songs bucket, RLS
 supabase/functions/studio-generate-song/      Edge Function + providers/
+supabase/functions/studio-musicgpt-hook/      MusicGPT webhook → finishMusicGpt
 supabase/functions/studio-write-lyrics/       AI 寫歌詞: Claude via TIO AI Hub chat (app `studio`, chat only), 30/member/HK day in app_studio.ai_usage
 supabase/seed.sql  band membership (Gino owner, Vicky, Ding Ding) after they sign in once
 ```
