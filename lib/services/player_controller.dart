@@ -1,44 +1,64 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/song.dart';
+import 'audio/audio_engine.dart';
 import 'songs_service.dart';
 
 enum LoopMode { off, all, one }
 
 /// The one audio player of the app: a queue of songs with next / previous,
 /// shuffle and repeat. The mini player, the song screen and the lyrics all
-/// listen to it.
+/// listen to it, and so do the lock screen and headphone buttons.
 class PlayerController extends ChangeNotifier {
   PlayerController(this._service) {
     _subs.add(
-      _player.onPositionChanged.listen((p) {
+      _player.onPosition.listen((p) {
         position = p;
         notifyListeners();
       }),
     );
     _subs.add(
-      _player.onDurationChanged.listen((d) {
+      _player.onDuration.listen((d) {
         duration = d;
         notifyListeners();
       }),
     );
     _subs.add(
-      _player.onPlayerStateChanged.listen((s) {
-        playing = s == PlayerState.playing;
+      _player.onPlaying.listen((p) {
+        playing = p;
         notifyListeners();
       }),
     );
-    _subs.add(_player.onPlayerComplete.listen((_) => _onComplete()));
+    _subs.add(_player.onComplete.listen((_) => _onComplete()));
+    _player.setRemoteCommands(
+      RemoteCommands(
+        play: () => _player.hasSource ? _player.resume() : toggle(),
+        pause: () => _player.pause(),
+        next: () => next(),
+        previous: () => previous(),
+        seek: (to) => seek(to),
+      ),
+    );
   }
 
   final SongsService _service;
-  final _player = AudioPlayer();
+  final AudioEngine _player = AudioEngine();
+
+  /// Signed URLs by audio path. Fetched ahead for the next song, so that when
+  /// a song ends with the screen locked the next one starts at once, without
+  /// waiting on the network while the browser may be throttling the page.
+  final _urls = <String, ({DateTime at, Future<String> url})>{};
+
+  /// The queue position chosen to play after the current one (picked early
+  /// when shuffling, so its URL can be fetched ahead).
+  int? _upNext;
   final _subs = <StreamSubscription<dynamic>>[];
   final _random = Random();
+
+  static const _band = '開心家庭大樂隊';
 
   List<Song> queue = const [];
   int index = -1;
@@ -87,11 +107,13 @@ class PlayerController extends ChangeNotifier {
     error = null;
     notifyListeners();
     final song = queue[i];
+    _upNext = null;
+    _showNowPlaying(song);
     try {
-      final url = await _service.signedAudioUrl(song.audioPath!);
+      final url = await _url(song.audioPath!);
       if (current?.id != song.id) return; // skipped meanwhile
-      await _player.stop();
-      await _player.play(UrlSource(url));
+      await _player.play(url);
+      _prepareNext();
     } catch (e) {
       error = '播唔到：$e';
     } finally {
@@ -100,11 +122,60 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  Future<String> _url(String path) {
+    final hit = _urls[path];
+    // Signed for an hour; renew after 45 minutes.
+    if (hit != null &&
+        DateTime.now().difference(hit.at) < const Duration(minutes: 45)) {
+      return hit.url;
+    }
+    final url = _service.signedAudioUrl(path);
+    _urls[path] = (at: DateTime.now(), url: url);
+    url.catchError((Object _) {
+      _urls.remove(path);
+      return '';
+    });
+    return url;
+  }
+
+  int? _pickNext() {
+    if (queue.isEmpty) return null;
+    if (shuffle && queue.length > 1) {
+      var n = index;
+      while (n == index) {
+        n = _random.nextInt(queue.length);
+      }
+      return n;
+    }
+    if (index < queue.length - 1) return index + 1;
+    if (repeat == LoopMode.all) return 0;
+    return null;
+  }
+
+  void _prepareNext() {
+    final n = _upNext = _pickNext();
+    if (n == null) return;
+    final path = queue[n].audioPath;
+    if (path != null) _url(path).ignore();
+  }
+
+  void _showNowPlaying(Song song) {
+    _player.setNowPlaying(NowPlaying(title: song.title, artist: _band));
+    final cover = song.coverPath;
+    if (cover == null || cover.toLowerCase().endsWith('.svg')) return;
+    _service.coverUrl(cover).then((url) {
+      if (current?.id != song.id) return;
+      _player.setNowPlaying(
+        NowPlaying(title: song.title, artist: _band, artUrl: url),
+      );
+    }).ignore();
+  }
+
   Future<void> toggle() async {
     if (current == null) return;
     if (playing) {
       await _player.pause();
-    } else if (_player.source == null) {
+    } else if (!_player.hasSource) {
       await _load(index);
     } else {
       await _player.resume();
@@ -123,16 +194,12 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> next() async {
     if (queue.isEmpty) return;
-    _history.add(index);
-    if (shuffle && queue.length > 1) {
-      var n = index;
-      while (n == index) {
-        n = _random.nextInt(queue.length);
-      }
+    final up = _upNext;
+    final n = up != null && up < queue.length && up != index ? up : _pickNext();
+    if (n != null) {
+      _history.add(index);
       return _load(n);
     }
-    if (index < queue.length - 1) return _load(index + 1);
-    if (repeat == LoopMode.all) return _load(0);
     await _player.stop();
     await seek(Duration.zero);
   }
@@ -148,11 +215,13 @@ class PlayerController extends ChangeNotifier {
 
   void toggleShuffle() {
     shuffle = !shuffle;
+    if (current != null) _prepareNext();
     notifyListeners();
   }
 
   void cycleRepeat() {
     repeat = LoopMode.values[(repeat.index + 1) % LoopMode.values.length];
+    if (current != null) _prepareNext();
     notifyListeners();
   }
 
@@ -185,12 +254,14 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     queue = fresh;
+    _upNext = null;
     final i = fresh.indexWhere((s) => s.id == cur);
     if (i >= 0) {
       index = i;
     } else {
       index = -1;
       _player.stop();
+      _player.setNowPlaying(null);
     }
     _history.clear();
     notifyListeners();
@@ -199,8 +270,10 @@ class PlayerController extends ChangeNotifier {
   /// Closes the mini player.
   Future<void> close() async {
     await _player.stop();
+    _player.setNowPlaying(null);
     queue = const [];
     index = -1;
+    _upNext = null;
     _history.clear();
     notifyListeners();
   }
