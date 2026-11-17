@@ -12,8 +12,13 @@ in CI, `.order()` ascending, generic `set_updated_at` trigger).
   It follows tio-ai-hub `docs/SHARED_DB.md`: this app is app id `studio`, its tables live in
   schema `app_studio`, membership is `core.app_members`, bucket `studio-songs`, Edge Function
   `studio-generate-song`, secrets `STUDIO_*`. Hub and TIO Bot share the same project.
-- Live changes: Gino pastes SQL in the SQL Editor (connector writes don't reach him), then runs
-  tio-ai-hub `supabase/app-template/checks.sql` (must return 0 rows).
+- Migrations (Gino chose 2026-11-17, "A"): a new `supabase/migrations/studio_NNNN_<name>.sql` is
+  applied by `.github/workflows/migrations.yml` after it reaches main (`tool/apply_migrations.sh`:
+  skips names already in `core.migrations`, one transaction per file with its `core.migrations`
+  row, then `supabase/checks.sql`, a copy of tio-ai-hub's, must return 0 rows). The job runs in
+  GitHub environment `hub-db` (Gino is the required reviewer; secret `SUPABASE_ACCESS_TOKEN`), so
+  nothing reaches the live DB until he approves the run, even if TIO Bot merged the PR.
+  `DRY_RUN=1 tool/apply_migrations.sh` lists what would run. Never edit an applied file: add a new one.
 - The old project "TIO Studio Project" (`ewvaukmegoyuvrtxvbhf`, never generated a song) is
   retired; don't delete it until the app works on the Hub project.
 
