@@ -58,6 +58,11 @@ per-step velocity, >2 bars, sample-based instruments.
   `members()` (names/avatars): migration studio_0003_player, test supabase/tests/studio_player_rls_test.sql.
 - `LibraryStore` holds songs/likes/playlists/members for the whole app; `PlayerController` is the
   one AudioPlayer. `LibraryStore.seed` fills it without a backend (design previews, widget tests).
+- Background play (2026-11-17): `PlayerController` plays through `lib/services/audio/AudioEngine`.
+  Web uses ONE plain `<audio>` element + Media Session (lock-screen title, play/pause/next/prev/seek);
+  never route it through Web Audio (audioplayers_web does, and iOS suspends that AudioContext when the
+  screen locks). The next song's signed URL is fetched ahead so a locked phone moves on without a
+  network wait. Native: audioplayers + `UIBackgroundModes: audio`, Android wake lock.
 - Live changes are now applied from cloud sessions with `SUPABASE_ACCESS_TOKEN` (Management API SQL,
   `npx supabase functions deploy <fn> --project-ref ddzwhmcxeokkwzmhglft --use-api --yes`).
 
