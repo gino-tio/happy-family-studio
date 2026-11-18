@@ -13,9 +13,11 @@ import '../widgets/cover_art.dart';
 import '../widgets/lyrics_view.dart';
 import '../widgets/player_widgets.dart';
 import '../widgets/song_cards.dart';
+import '../widgets/stems_view.dart';
 
 /// One song: big cover, player, like / playlist / cover buttons, and tabs for
-/// lyrics (karaoke style when timed), family comments and details. Wide
+/// lyrics (karaoke style when timed), family comments, instruments (拆樂器 /
+/// 換歌詞) and details. Wide
 /// screens put the cover on the left and the tabs on the right.
 class SongScreen extends StatefulWidget {
   const SongScreen({super.key, required this.songId, this.queue = const []});
@@ -82,7 +84,7 @@ class _SongScreenState extends State<SongScreen> {
           ),
           SafeArea(
             child: DefaultTabController(
-              length: 3,
+              length: 4,
               child: wide
                   ? _wide(store, song, queue, size)
                   : _narrow(store, song, queue, size),
@@ -295,6 +297,7 @@ class _SongScreenState extends State<SongScreen> {
     tabs: [
       const Tab(text: '歌詞'),
       Tab(text: _comments == null || _comments == 0 ? '留言' : '$_comments 留言'),
+      const Tab(text: '樂器'),
       const Tab(text: '資料'),
     ],
   );
@@ -309,6 +312,7 @@ class _SongScreenState extends State<SongScreen> {
             if (n != _comments && mounted) setState(() => _comments = n);
           },
         ),
+        StemsView(key: ValueKey(song.id), song: song),
         _details(store, song),
       ],
     );
@@ -342,7 +346,11 @@ class _SongScreenState extends State<SongScreen> {
         row(
           '歌手',
           song.provider == 'musicgpt'
-              ? 'MusicGPT（廣東話）· ${song.model}'
+              ? 'MusicGPT（廣東話）· ${switch (song.model) {
+                  'sing_over_instrumental' => '換歌詞',
+                  'remix' => '由上載嘅歌整',
+                  _ => song.model,
+                }}'
               : '${song.provider} · ${song.model}',
         ),
         row('鍾意', '${store.likeCount(song.id)} 個 ♥'),

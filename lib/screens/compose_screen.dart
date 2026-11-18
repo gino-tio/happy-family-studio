@@ -1,3 +1,5 @@
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,6 +10,8 @@ import '../theme.dart';
 import 'song_screen.dart';
 
 /// 作新歌 — title + style prompt + lyrics → studio-generate-song Edge Function.
+/// 「由一首歌開始」: with an uploaded song, MusicGPT makes a new one in its
+/// style instead (studio-song-tools, action remix).
 class ComposeScreen extends StatefulWidget {
   const ComposeScreen({super.key, this.initialTitle, this.initialStyle});
 
@@ -30,6 +34,40 @@ class _ComposeScreenState extends State<ComposeScreen> {
   bool _busy = false;
   bool _writing = false;
 
+  /// The song picked for 「由一首歌開始」 (null = make one from the prompt).
+  ({String name, Uint8List bytes})? _upload;
+
+  static const _maxUploadBytes = 20 * 1024 * 1024;
+
+  Future<void> _pickUpload() async {
+    try {
+      final f = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'flac'],
+      );
+      if (f == null || !mounted) return;
+      final size = await f.length();
+      if (size != null && size > _maxUploadBytes) {
+        _say('個檔太大，最多 20 MB');
+        return;
+      }
+      final bytes = await f.readAsBytes();
+      if (bytes.length > _maxUploadBytes) {
+        _say('個檔太大，最多 20 MB');
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _upload = (name: f.name, bytes: bytes));
+    } catch (e) {
+      _say('揀唔到檔案：$e');
+    }
+  }
+
+  void _say(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   @override
   void dispose() {
     _title.dispose();
@@ -42,16 +80,27 @@ class _ComposeScreenState extends State<ComposeScreen> {
     if (!_form.currentState!.validate()) return;
     setState(() => _busy = true);
     try {
-      final song = await context.read<SongsService>().generate(
-        SongDraft(
-          title: _title.text,
-          style: _style.text,
-          lyrics: _lyrics.text,
-          instrumental: _instrumental,
-          lengthMs: (_seconds * 1000).round(),
-          provider: _provider,
-        ),
-      );
+      final service = context.read<SongsService>();
+      final upload = _upload;
+      final song = upload != null
+          ? await service.remixUpload(
+              bytes: upload.bytes,
+              fileName: upload.name,
+              title: _title.text.trim(),
+              style: _style.text.trim(),
+              lyrics: _lyrics.text.trim(),
+              instrumental: _instrumental,
+            )
+          : await service.generate(
+              SongDraft(
+                title: _title.text,
+                style: _style.text,
+                lyrics: _lyrics.text,
+                instrumental: _instrumental,
+                lengthMs: (_seconds * 1000).round(),
+                provider: _provider,
+              ),
+            );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => SongScreen(songId: song.id)),
@@ -94,6 +143,36 @@ class _ComposeScreenState extends State<ComposeScreen> {
     }
   }
 
+  /// 「由一首歌開始」: pick a song to start from, or clear it.
+  Widget _uploadCard() {
+    final up = _upload;
+    if (up == null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: _busy ? null : _pickUpload,
+          icon: const Icon(Icons.upload_file_rounded),
+          label: const Text('由一首歌開始（上載 mp3 / m4a / wav）'),
+        ),
+      );
+    }
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.audio_file_rounded),
+        title: Text(up.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: const Text(
+          'MusicGPT 會用呢首歌嘅風格同音樂整一首新歌（兩個版本）。'
+          '最好用自己或者有權用嘅歌；上載嘅歌只有你自己睇到。每人每日 10 次。',
+        ),
+        trailing: IconButton(
+          tooltip: '唔用呢首',
+          icon: const Icon(Icons.close_rounded),
+          onPressed: _busy ? null : () => setState(() => _upload = null),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -109,6 +188,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
               decoration: const InputDecoration(labelText: '歌名'),
               validator: (v) => (v == null || v.trim().isEmpty) ? '要有歌名' : null,
             ),
+            _uploadCard(),
             const SizedBox(height: StudioSpacing.md),
             Wrap(
               spacing: StudioSpacing.sm,
@@ -132,7 +212,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 hintText: '例如：90年代芬達結他搖滾，男聲，120 BPM',
               ),
               validator: (v) =>
-                  ((v ?? '').trim().isEmpty &&
+                  (_upload == null &&
+                      (v ?? '').trim().isEmpty &&
                       (_instrumental || _lyrics.text.trim().isEmpty))
                   ? '寫低風格或者歌詞'
                   : null,
@@ -170,34 +251,34 @@ class _ComposeScreenState extends State<ComposeScreen> {
                   alignLabelWithHint: true,
                 ),
               ),
-            const SizedBox(height: StudioSpacing.md),
-            const Text('邊個 AI 作曲'),
-            const SizedBox(height: StudioSpacing.sm),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'elevenlabs', label: Text('ElevenLabs')),
-                ButtonSegment(value: 'musicgpt', label: Text('MusicGPT')),
-                ButtonSegment(value: 'acestep', label: Text('ACE-Step（實驗）')),
-              ],
-              selected: {_provider},
-              onSelectionChanged: (v) => setState(() => _provider = v.first),
-            ),
-            const SizedBox(height: StudioSpacing.xs),
-            Text(switch (_provider) {
-              'musicgpt' => 'MusicGPT：廣東話，一次兩個版本',
-              'acestep' => 'ACE-Step：開源模型，廣東話，一次兩個版本',
-              _ => 'ElevenLabs：中文會唱普通話',
-            }, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: StudioSpacing.md),
-            Text('長度：${_seconds.round()} 秒'),
-            Slider(
-              min: 30,
-              max: 300,
-              divisions: 27,
-              value: _seconds,
-              label: '${_seconds.round()}s',
-              onChanged: (v) => setState(() => _seconds = v),
-            ),
+            if (_upload == null) ...[
+              const SizedBox(height: StudioSpacing.md),
+              const Text('邊個 AI 作曲'),
+              const SizedBox(height: StudioSpacing.sm),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'elevenlabs', label: Text('ElevenLabs')),
+                  ButtonSegment(value: 'musicgpt', label: Text('MusicGPT')),
+                ],
+                selected: {_provider},
+                onSelectionChanged: (v) => setState(() => _provider = v.first),
+              ),
+              const SizedBox(height: StudioSpacing.xs),
+              Text(switch (_provider) {
+                'musicgpt' => 'MusicGPT：廣東話，一次兩個版本',
+                _ => 'ElevenLabs：中文會唱普通話',
+              }, style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: StudioSpacing.md),
+              Text('長度：${_seconds.round()} 秒'),
+              Slider(
+                min: 30,
+                max: 300,
+                divisions: 27,
+                value: _seconds,
+                label: '${_seconds.round()}s',
+                onChanged: (v) => setState(() => _seconds = v),
+              ),
+            ],
             const SizedBox(height: StudioSpacing.lg),
             FilledButton.icon(
               onPressed: _busy ? null : _submit,

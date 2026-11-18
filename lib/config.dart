@@ -37,6 +37,12 @@ class Env {
   /// Edge Function that generates a song.
   static const generateSongFunction = 'studio-generate-song';
 
+  /// Edge Function for 拆樂器 / 換歌詞 / 由一首歌開始 (MusicGPT tools).
+  static const songToolsFunction = 'studio-song-tools';
+
+  /// Private bucket a member uploads a song into (their own folder only).
+  static const uploadsBucket = 'studio-uploads';
+
   /// Edge Function that writes Cantonese lyrics with Claude (via the TIO AI Hub).
   static const writeLyricsFunction = 'studio-write-lyrics';
 
