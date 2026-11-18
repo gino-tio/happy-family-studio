@@ -183,14 +183,11 @@ class _ComposeScreenState extends State<ComposeScreen> {
               onSelectionChanged: (v) => setState(() => _provider = v.first),
             ),
             const SizedBox(height: StudioSpacing.xs),
-            Text(
-              switch (_provider) {
-                'musicgpt' => 'MusicGPT：廣東話，一次兩個版本',
-                'acestep' => 'ACE-Step：開源模型，廣東話，一次兩個版本',
-                _ => 'ElevenLabs：中文會唱普通話',
-              },
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+            Text(switch (_provider) {
+              'musicgpt' => 'MusicGPT：廣東話，一次兩個版本',
+              'acestep' => 'ACE-Step：開源模型，廣東話，一次兩個版本',
+              _ => 'ElevenLabs：中文會唱普通話',
+            }, style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: StudioSpacing.md),
             Text('長度：${_seconds.round()} 秒'),
             Slider(
