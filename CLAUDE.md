@@ -83,8 +83,20 @@ per-step velocity, >2 bars, sample-based instruments.
   scales to zero; setup in `modal/README.md`), `providers/acestep.ts`, secrets
   `STUDIO_ACESTEP_URL` / `STUDIO_ACESTEP_TOKEN`. Same async shape as MusicGPT: Modal job id in
   `provider_song_id`, polling ~130 s, then `studio-acestep-hook` (verify_jwt off, nudge only).
-  Covers are Claude SVGs. The app labels it 「ACE-Step（實驗）」.
-- **Vendor keys never reach the client.** Only `studio-generate-song` talks to the AI
+  Covers are Claude SVGs. Hidden from the compose screen since 2026-11-18 (Cantonese judged bad).
+- **MusicGPT tools on songs** (Gino 2026-11-18, all recommended answers; ACE-Step was tried
+  the same day and its Cantonese judged bad, so its compose button is hidden; the Modal app and
+  provider stay for now). `studio-song-tools` (migration studio_0004_tools): 拆樂器 = Extraction
+  `stem_preset=6_stems` into `song_stems` (tracks in studio-songs `<user>/stems/<song>/<kind>.mp3`);
+  換歌詞 = Sing Over Instrumental on the split's instrumental → new song, model
+  `sing_over_instrumental`, `source='swap'`, `parent_song_id`; 由一首歌開始 = member uploads to
+  private bucket `studio-uploads/<user>/...`, then Remix → new song, model `remix`,
+  `source='remix'`. Each is 10/member/HK day in ai_usage. MusicGPT's audio_url only takes YouTube
+  links, so the function uploads files. byId conversionType follows the song's model
+  (`conversionTypeFor`). The Extraction byId shape isn't documented: `findStemUrls` walks the
+  reply and logs field names if it finds none. studio-musicgpt-hook finishes splits too.
+  Next (PR 2): 出譜 = Audio to MIDI per track, drawn as drum sheet / guitar & bass tab / staff.
+- **Vendor keys never reach the client.** Only Edge Functions (`studio-generate-song`, `studio-song-tools`) talk to the AI
   music API; keys are Supabase secrets.
 - **Membership, not sign-in, is the gate.** Every RLS policy checks
   `core.is_member('studio')`; the app asks `app_studio.me()`. Google sign-in alone grants

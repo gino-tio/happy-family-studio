@@ -108,8 +108,18 @@ export function parseByIdReply(out: any): MusicGptState {
   return { state: "pending" };
 }
 
-export async function checkMusicGpt(key: string, taskId: string): Promise<MusicGptState> {
-  const u = `${API}/v1/byId?conversionType=MUSIC_AI&task_id=${encodeURIComponent(taskId)}`;
+/** MusicGPT's byId conversionType for a song row's model (換歌詞 and remix songs aren't MUSIC_AI). */
+export function conversionTypeFor(model: string): string {
+  if (model === SING_OVER_MODEL) return "SING_OVER_INSTRUMENTAL";
+  if (model === REMIX_MODEL) return "REMIX";
+  return "MUSIC_AI";
+}
+
+export const SING_OVER_MODEL = "sing_over_instrumental";
+export const REMIX_MODEL = "remix";
+
+export async function checkMusicGpt(key: string, taskId: string, type = "MUSIC_AI"): Promise<MusicGptState> {
+  const u = `${API}/v1/byId?conversionType=${type}&task_id=${encodeURIComponent(taskId)}`;
   const res = await fetch(u, { headers: { Authorization: key } });
   if (!res.ok) return { state: "pending" };
   return parseByIdReply(await res.json().catch(() => ({})));
@@ -132,7 +142,7 @@ export async function finishMusicGpt(
     .eq("provider", "musicgpt").eq("provider_song_id", taskId).eq("status", "generating")
     .order("created_at", { ascending: true }).limit(1).maybeSingle();
   if (!song) return "unknown";
-  const st = await checkMusicGpt(key, taskId);
+  const st = await checkMusicGpt(key, taskId, conversionTypeFor(song.model));
   if (st.state === "pending") return "pending";
   if (st.state === "failed") {
     await db.from("songs").update({ status: "failed", error: `MusicGPT: ${st.error}` })
@@ -184,14 +194,14 @@ async function saveVendorCover(admin: any, url: string, songIds: string[]): Prom
  */
 export async function enrichMusicGpt(admin: any, schema: string, key: string, taskId: string): Promise<boolean> {
   const db = admin.schema(schema);
-  const { data: rows } = await db.from("songs").select("id, title, instrumental, cover_path, lyrics_timed")
+  const { data: rows } = await db.from("songs").select("id, title, model, instrumental, cover_path, lyrics_timed")
     .eq("provider", "musicgpt").eq("provider_song_id", taskId).eq("status", "done")
     .order("created_at", { ascending: true });
   if (!rows?.length) return true;
   const needCover = rows.filter((r: any) => !r.cover_path);
   const needLyrics = rows.filter((r: any) => !r.instrumental && !r.lyrics_timed);
   if (!needCover.length && !needLyrics.length) return true;
-  const st = await checkMusicGpt(key, taskId);
+  const st = await checkMusicGpt(key, taskId, conversionTypeFor(rows[0].model));
   if (st.state !== "done") return false;
   let complete = true;
   if (needCover.length) {

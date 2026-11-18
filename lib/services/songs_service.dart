@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../models/social.dart';
 import '../models/song.dart';
+import '../models/stems.dart';
 
 class SongsService {
   final _client = Supabase.instance.client;
@@ -101,6 +104,107 @@ class SongsService {
       );
     }
   }
+
+  // Tools: 拆樂器 / 換歌詞 / 由一首歌開始 ------------------------------------
+
+  /// The live split of a song (null until 拆樂器 is pressed). The newest row
+  /// wins, so a retry after a failure shows the new attempt.
+  Stream<SongStems?> watchStems(String songId) => _db
+      .from('song_stems')
+      .stream(primaryKey: ['id'])
+      .eq('song_id', songId)
+      .order('created_at', ascending: false)
+      .map((rows) => rows.isEmpty ? null : SongStems.fromRow(rows.first));
+
+  Future<Map<String, dynamic>> _tool(Map<String, dynamic> body) async {
+    try {
+      final res = await _client.functions.invoke(
+        Env.songToolsFunction,
+        body: body,
+      );
+      final data = res.data;
+      if (data is Map) return Map<String, dynamic>.from(data);
+      throw Exception('Unexpected response');
+    } on FunctionException catch (e) {
+      final d = e.details;
+      throw Exception(
+        d is Map && d['error'] is String ? d['error'] : '做唔到，遲啲再試',
+      );
+    }
+  }
+
+  /// 拆樂器: splits a song into six tracks in the background.
+  Future<void> splitSong(String songId) =>
+      _tool({'action': 'stems', 'song_id': songId});
+
+  /// 換歌詞: sings [lyrics] over the song's instrumental track (needs a
+  /// finished split). Returns the new song (status `generating`).
+  Future<Song> swapLyrics(
+    String songId, {
+    required String lyrics,
+    String title = '',
+  }) async {
+    final data = await _tool({
+      'action': 'swap',
+      'song_id': songId,
+      'lyrics': lyrics,
+      'title': title,
+    });
+    return Song.fromRow(Map<String, dynamic>.from(data['song'] as Map));
+  }
+
+  /// 由一首歌開始: uploads [bytes] into the member's own folder, then asks
+  /// MusicGPT for a new song in its style. Returns the new song.
+  Future<Song> remixUpload({
+    required Uint8List bytes,
+    required String fileName,
+    required String title,
+    required String style,
+    required String lyrics,
+    required bool instrumental,
+  }) async {
+    final uid = currentUserId;
+    if (uid == null) throw Exception('未登入');
+    final ext = fileName.contains('.')
+        ? fileName.split('.').last.toLowerCase()
+        : 'mp3';
+    final path = '$uid/${DateTime.now().millisecondsSinceEpoch}.$ext';
+    await _client.storage
+        .from(Env.uploadsBucket)
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(contentType: audioTypeFor(ext)),
+        );
+    final data = await _tool({
+      'action': 'remix',
+      'upload_path': path,
+      'title': title,
+      'style': style,
+      'lyrics': lyrics,
+      'instrumental': instrumental,
+    });
+    return Song.fromRow(Map<String, dynamic>.from(data['song'] as Map));
+  }
+
+  static String audioTypeFor(String ext) => switch (ext) {
+    'm4a' => 'audio/mp4',
+    'aac' => 'audio/aac',
+    'wav' => 'audio/wav',
+    'ogg' => 'audio/ogg',
+    'flac' => 'audio/flac',
+    _ => 'audio/mpeg',
+  };
+
+  /// Signed URL of a track; with [downloadAs] the browser saves it under that name.
+  Future<String> stemUrl(String path, {String? downloadAs}) => _client.storage
+      .from(Env.songsBucket)
+      .createSignedUrl(path, 60 * 60)
+      .then(
+        (u) => downloadAs == null
+            ? u
+            : '$u&download=${Uri.encodeQueryComponent(downloadAs)}',
+      );
 
   // Band, likes, comments, playlists -----------------------------------------
 
