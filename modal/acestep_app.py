@@ -50,6 +50,28 @@ models = modal.Volume.from_name("acestep-models", create_if_missing=True)
 secret = modal.Secret.from_name("studio-acestep")  # ACESTEP_TOKEN
 
 
+WEIGHTS = {
+    "ACE-Step/Ace-Step1.5": MODELS_DIR,  # VAE, text encoder, default DiT and LM
+    f"ACE-Step/{DIT_MODEL}": f"{MODELS_DIR}/{DIT_MODEL}",
+    f"ACE-Step/{LM_MODEL}": f"{MODELS_DIR}/{LM_MODEL}",
+}
+
+
+@app.function(image=image, volumes={MODELS_DIR: models}, timeout=3600)
+def download():
+    """Fetch every weight into the Volume on a CPU machine (no GPU billed). Run once, and
+    again after a partial download: `modal run modal/acestep_app.py::download`. snapshot_download
+    resumes and re-checks files, so a container stopped half way can't leave a broken model
+    behind (the GPU container then crash-loops on a missing shard)."""
+    from huggingface_hub import snapshot_download
+
+    for repo, local in WEIGHTS.items():
+        print("downloading", repo, "->", local, flush=True)
+        snapshot_download(repo_id=repo, local_dir=local)
+        models.commit()
+    print("all weights ready", flush=True)
+
+
 @app.cls(
     image=image,
     gpu="L40S",
@@ -69,6 +91,12 @@ class AceStep:
         msg, ok = self.dit.initialize_service(project_root="/app", config_path=DIT_MODEL, device="cuda")
         if not ok:
             raise RuntimeError(f"DiT init failed: {msg}")
+        from acestep.model_downloader import ensure_lm_model
+
+        ok, msg = ensure_lm_model(LM_MODEL, checkpoints_dir=MODELS_DIR)  # not in the main model repo
+        if not ok:
+            raise RuntimeError(f"LM download failed: {msg}")
+        models.commit()
         self.llm = LLMHandler()
         msg, ok = self.llm.initialize(checkpoint_dir=MODELS_DIR, lm_model_path=LM_MODEL, backend="pt", device="cuda")
         if not ok:
