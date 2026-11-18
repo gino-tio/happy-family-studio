@@ -29,16 +29,61 @@ class SongsService {
 
   /// Kicks off generation. Returns the new row immediately (status
   /// `generating`); the Edge Function finishes it in the background.
-  Future<Song> generate(SongDraft draft) async {
-    final res = await _client.functions.invoke(
-      Env.generateSongFunction,
-      body: draft.toJson(),
-    );
-    final data = res.data;
-    if (data is Map && data['song'] is Map) {
-      return Song.fromRow(Map<String, dynamic>.from(data['song'] as Map));
+  Future<Song> generate(SongDraft draft) => _startSong(
+    title: draft.title.trim(),
+    call: () async {
+      final Object? data;
+      try {
+        data = (await _client.functions.invoke(
+          Env.generateSongFunction,
+          body: draft.toJson(),
+        )).data;
+      } on FunctionException catch (e) {
+        if (e.status == 0) throw const ConnectionLost();
+        final d = e.details;
+        throw Exception(
+          d is Map && d['error'] is String ? d['error'] : '做唔到，遲啲再試',
+        );
+      }
+      if (data is Map && data['song'] is Map) {
+        return Song.fromRow(Map<String, dynamic>.from(data['song'] as Map));
+      }
+      throw Exception('Unexpected response: $data');
+    },
+  );
+
+  /// Starts a song. A phone can lose the connection after the function has
+  /// already made the song (the reply never arrives, status 0), so on a lost
+  /// connection look for the caller's new row before calling it a failure.
+  Future<Song> _startSong({
+    required Future<Song> Function() call,
+    String title = '',
+    String? parentSongId,
+  }) async {
+    final since = DateTime.now().toUtc().subtract(const Duration(minutes: 2));
+    try {
+      return await call();
+    } on ConnectionLost {
+      final uid = currentUserId;
+      if (uid == null) rethrow;
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(const Duration(seconds: 3));
+        try {
+          var q = _db
+              .from('songs')
+              .select()
+              .eq('created_by', uid)
+              .gte('created_at', since.toIso8601String());
+          if (title.isNotEmpty) q = q.eq('title', title);
+          if (parentSongId != null) q = q.eq('parent_song_id', parentSongId);
+          final rows = await q.order('created_at', ascending: true).limit(1);
+          if (rows.isNotEmpty) return Song.fromRow(rows.first);
+        } catch (_) {
+          // Still offline; try again.
+        }
+      }
+      rethrow;
     }
-    throw Exception('Unexpected response: $data');
   }
 
   /// Asks AI for Cantonese lyrics. Returns (title, lyrics); throws with the
@@ -126,6 +171,7 @@ class SongsService {
       if (data is Map) return Map<String, dynamic>.from(data);
       throw Exception('Unexpected response');
     } on FunctionException catch (e) {
+      if (e.status == 0) throw const ConnectionLost();
       final d = e.details;
       throw Exception(
         d is Map && d['error'] is String ? d['error'] : '做唔到，遲啲再試',
@@ -185,15 +231,18 @@ class SongsService {
     String songId, {
     required String lyrics,
     String title = '',
-  }) async {
-    final data = await _tool({
-      'action': 'swap',
-      'song_id': songId,
-      'lyrics': lyrics,
-      'title': title,
-    });
-    return Song.fromRow(Map<String, dynamic>.from(data['song'] as Map));
-  }
+  }) => _startSong(
+    parentSongId: songId,
+    call: () async {
+      final data = await _tool({
+        'action': 'swap',
+        'song_id': songId,
+        'lyrics': lyrics,
+        'title': title,
+      });
+      return Song.fromRow(Map<String, dynamic>.from(data['song'] as Map));
+    },
+  );
 
   /// 由一首歌開始: uploads [bytes] into the member's own folder, then asks
   /// MusicGPT for a new song in its style. Returns the new song.
@@ -218,15 +267,20 @@ class SongsService {
           bytes,
           fileOptions: FileOptions(contentType: audioTypeFor(ext)),
         );
-    final data = await _tool({
-      'action': 'remix',
-      'upload_path': path,
-      'title': title,
-      'style': style,
-      'lyrics': lyrics,
-      'instrumental': instrumental,
-    });
-    return Song.fromRow(Map<String, dynamic>.from(data['song'] as Map));
+    return _startSong(
+      title: title.trim(),
+      call: () async {
+        final data = await _tool({
+          'action': 'remix',
+          'upload_path': path,
+          'title': title,
+          'style': style,
+          'lyrics': lyrics,
+          'instrumental': instrumental,
+        });
+        return Song.fromRow(Map<String, dynamic>.from(data['song'] as Map));
+      },
+    );
   }
 
   static String audioTypeFor(String ext) => switch (ext) {
@@ -341,4 +395,12 @@ class SongsService {
       _db.from('songs').update({'title': title}).eq('id', id);
 
   Future<void> delete(String id) => _db.from('songs').delete().eq('id', id);
+}
+
+/// The request left the phone but no reply came back (Wi-Fi / 5G / VPN
+/// dropped). The work may still have started on the server.
+class ConnectionLost implements Exception {
+  const ConnectionLost();
+  @override
+  String toString() => '網絡斷咗，未知有冇開始整。睇吓「我嘅歌」，冇先再試。';
 }
