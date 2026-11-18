@@ -58,3 +58,33 @@ class SongStems {
     ],
   );
 }
+
+/// MIDI of one track (出譜), from `app_studio.stem_midis`.
+class StemMidi {
+  const StemMidi({
+    required this.kind,
+    required this.status,
+    this.midiPath,
+    this.error,
+  });
+
+  final String kind;
+
+  /// 'generating', 'done' or 'failed'.
+  final String status;
+  final String? midiPath;
+  final String? error;
+
+  bool get isDone => status == 'done' && midiPath != null;
+  bool get isFailed => status == 'failed';
+
+  factory StemMidi.fromRow(Map<String, dynamic> row) => StemMidi(
+    kind: row['kind'] as String,
+    status: (row['status'] as String?) ?? 'generating',
+    midiPath: row['midi_path'] as String?,
+    error: row['error'] as String?,
+  );
+
+  /// Track kinds MusicGPT turns into MIDI; drums are read from audio instead.
+  static const kinds = {'vocals', 'piano', 'bass', 'guitar'};
+}

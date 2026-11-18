@@ -5,6 +5,9 @@
 // POST { action: "stems", song_id }
 //   拆樂器: six tracks (vocals, instrumental, piano, bass, drums, guitar) into song_stems.
 //   202 { stems: <row> }; an existing live split is returned as is (200), no quota used.
+// POST { action: "midi", song_id, kind: vocals|piano|bass|guitar }
+//   出譜: that track of a finished split → MIDI (MusicGPT Audio to MIDI) into stem_midis.
+//   202 { midi: <row> }; an existing live one is returned as is (200), no quota used.
 // POST { action: "swap", song_id, lyrics, title?, style? }
 //   換歌詞: new lyrics sung over the song's instrumental track (needs a finished split).
 //   202 { song: <row> } — a new song "<title>（新詞）", two versions like MusicGPT songs.
@@ -15,7 +18,7 @@
 //         409 split not ready · 429 daily quota · 502 MusicGPT refused.
 //
 // Quotas per member per Hong Kong day (app_studio.ai_usage): STUDIO_STEMS_PER_DAY (10),
-// STUDIO_SWAPS_PER_DAY (10), STUDIO_REMIXES_PER_DAY (10).
+// STUDIO_SWAPS_PER_DAY (10), STUDIO_REMIXES_PER_DAY (10), STUDIO_MIDIS_PER_DAY (20).
 // Finishing: this worker polls ~130 s; studio-musicgpt-hook finishes anything slower.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -30,6 +33,7 @@ import {
   addSongFields,
   audioForm,
   audioTypeFor,
+  finishMidi,
   finishStems,
   genderFrom,
   hkDayStart,
@@ -59,7 +63,9 @@ const QUOTA = {
   stems: ["STUDIO_STEMS_PER_DAY", "拆樂器"],
   swap: ["STUDIO_SWAPS_PER_DAY", "換歌詞"],
   remix: ["STUDIO_REMIXES_PER_DAY", "上載作歌"],
+  midi: ["STUDIO_MIDIS_PER_DAY", "出譜"],
 } as const;
+const DEFAULT_PER_DAY = { stems: 10, swap: 10, remix: 10, midi: 20 } as const;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -102,9 +108,9 @@ Deno.serve(async (req) => {
   }
 
   // Counts today's uses; inserts the row before calling MusicGPT, like the other quotas.
-  async function takeQuota(kind: "stems" | "swap" | "remix"): Promise<Response | null> {
+  async function takeQuota(kind: keyof typeof QUOTA): Promise<Response | null> {
     const [env, label] = QUOTA[kind];
-    const perDay = Number(Deno.env.get(env) ?? "10") || 10;
+    const perDay = Number(Deno.env.get(env) ?? "") || DEFAULT_PER_DAY[kind];
     const { count, error } = await db.from("ai_usage").select("id", { count: "exact", head: true })
       .eq("user_id", user!.id).eq("kind", kind).gte("created_at", hkDayStart());
     if (error) return json(500, { error: "quota check failed" });
@@ -184,6 +190,49 @@ Deno.serve(async (req) => {
       }
     })());
     return json(202, { stems: row });
+  }
+
+  if (tr.action === "midi") {
+    const { data: split } = await db.from("song_stems").select("stems").eq("song_id", tr.songId)
+      .eq("status", "done").maybeSingle();
+    const stem = (split?.stems as { kind: string; path: string }[] | undefined)?.find((s) => s.kind === tr.kind);
+    if (!stem) return json(409, { error: "要先拆樂器，先可以出譜" });
+    const { data: live } = await db.from("stem_midis").select("*").eq("song_id", tr.songId)
+      .eq("kind", tr.kind).neq("status", "failed").maybeSingle();
+    if (live) return json(200, { midi: live });
+    const over = await takeQuota("midi");
+    if (over) return over;
+    let taskId: string;
+    try {
+      const bytes = await download(BUCKET, stem.path);
+      const form = audioForm(bytes, stem.path.split("/").pop()!, audioTypeFor(stem.path) ?? "audio/mpeg");
+      form.append("sonify_midi", "false");
+      form.append("save_note_events", "false");
+      form.append("webhook_url", hook);
+      taskId = await submitForm(key, "/v1/audio_to_midi", form);
+    } catch (e) {
+      return json(502, { error: (e as Error).message });
+    }
+    const { data: row, error } = await db.from("stem_midis").insert({
+      song_id: tr.songId,
+      kind: tr.kind,
+      created_by: user.id,
+      status: "generating",
+      provider_task_id: taskId,
+    }).select().single();
+    if (error) return json(500, { error: error.message });
+    EdgeRuntime.waitUntil((async () => {
+      const started = Date.now();
+      while (Date.now() - started < 130_000) {
+        await new Promise((r) => setTimeout(r, 6_000));
+        try {
+          if (await finishMidi(admin, SCHEMA, BUCKET, key, taskId) !== "pending") return;
+        } catch (e) {
+          console.error("tools: midi finish failed", (e as Error).message);
+        }
+      }
+    })());
+    return json(202, { midi: row });
   }
 
   if (tr.action === "swap") {

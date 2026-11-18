@@ -183,6 +183,90 @@ export async function finishStems(
   return "done";
 }
 
+/** Track kinds that 出譜 turns into MIDI (drums are read from audio on the sheet page). */
+export const MIDI_KINDS = ["vocals", "piano", "bass", "guitar"] as const;
+
+const MIDI_URL = /^https:\/\/[^\s"]+\.midi?(\?[^\s"]*)?$/i;
+
+/** The MIDI file URL anywhere in an Audio to MIDI byId reply. */
+export function findMidiUrl(v: unknown, depth = 0): string | null {
+  if (depth > 6 || v === null || v === undefined) return null;
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (MIDI_URL.test(s)) return s;
+    if ((s.startsWith("{") || s.startsWith("[")) && s.length < 100_000) {
+      try {
+        return findMidiUrl(JSON.parse(s), depth + 1);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  if (typeof v !== "object") return null;
+  for (const x of Array.isArray(v) ? v : Object.values(v as Record<string, unknown>)) {
+    const u = findMidiUrl(x, depth + 1);
+    if (u) return u;
+  }
+  return null;
+}
+
+export type MidiState =
+  | { state: "pending" }
+  | { state: "failed"; error: string }
+  | { state: "done"; url: string };
+
+export function parseMidiReply(out: any): MidiState {
+  const c = out?.conversion ?? out ?? {};
+  const status = String(c.status ?? "").toUpperCase();
+  if (status === "FAILED" || status === "ERROR") {
+    return { state: "failed", error: String(c.status_msg ?? c.message ?? status).slice(0, 300) };
+  }
+  if (status !== "COMPLETED") return { state: "pending" };
+  const url = findMidiUrl(c);
+  return url ? { state: "done", url } : { state: "pending" };
+}
+
+/** Stores a finished MIDI and marks its stem_midis row done. Safe to call more than once. */
+export async function finishMidi(
+  admin: any,
+  schema: string,
+  bucket: string,
+  key: string,
+  taskId: string,
+): Promise<"pending" | "done" | "failed" | "unknown"> {
+  const db = admin.schema(schema);
+  const { data: row } = await db.from("stem_midis").select("id, song_id, kind, created_by")
+    .eq("provider_task_id", taskId).eq("status", "generating").limit(1).maybeSingle();
+  if (!row) return "unknown";
+  const res = await fetch(`${API}/v1/byId?conversionType=AUDIO_TO_MIDI&task_id=${encodeURIComponent(taskId)}`, {
+    headers: { Authorization: key },
+  });
+  const out = res.ok ? await res.json().catch(() => ({})) : {};
+  const st = parseMidiReply(out);
+  if (st.state === "pending") {
+    if (String((out as any)?.conversion?.status ?? "").toUpperCase() === "COMPLETED") {
+      console.error("midi: completed without a .mid url; keys:", Object.keys((out as any).conversion ?? {}).join(","));
+    }
+    return "pending";
+  }
+  if (st.state === "failed") {
+    await db.from("stem_midis").update({ status: "failed", error: `MusicGPT: ${st.error}` })
+      .eq("id", row.id).eq("status", "generating");
+    return "failed";
+  }
+  const file = await fetch(st.url);
+  if (!file.ok) throw new Error(`midi download ${file.status}`);
+  const path = `${row.created_by}/stems/${row.song_id}/${row.kind}.mid`;
+  const { error } = await admin.storage.from(bucket).upload(path, new Uint8Array(await file.arrayBuffer()), {
+    contentType: "audio/midi",
+    upsert: true,
+  });
+  if (error) throw error;
+  await db.from("stem_midis").update({ status: "done", midi_path: path }).eq("id", row.id).eq("status", "generating");
+  return "done";
+}
+
 /** Start of today in Hong Kong, for the daily quotas. */
 export function hkDayStart(now = new Date()): string {
   const hk = new Date(now.getTime() + 8 * 3600_000);
@@ -207,6 +291,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type ToolRequest =
   | { action: "stems"; songId: string }
+  | { action: "midi"; songId: string; kind: typeof MIDI_KINDS[number] }
   | { action: "swap"; songId: string; lyrics: string; title: string; style: string | null }
   | { action: "remix"; uploadPath: string; title: string; style: string; lyrics: string; instrumental: boolean };
 
@@ -218,6 +303,13 @@ export function parseToolRequest(raw: unknown, userId: string): ToolRequest | st
     case "stems": {
       const songId = str("song_id");
       return UUID.test(songId) ? { action: "stems", songId } : "song_id is required";
+    }
+    case "midi": {
+      const songId = str("song_id");
+      if (!UUID.test(songId)) return "song_id is required";
+      const kind = str("kind");
+      if (!(MIDI_KINDS as readonly string[]).includes(kind)) return "kind must be vocals, piano, bass or guitar";
+      return { action: "midi", songId, kind: kind as typeof MIDI_KINDS[number] };
     }
     case "swap": {
       const songId = str("song_id");

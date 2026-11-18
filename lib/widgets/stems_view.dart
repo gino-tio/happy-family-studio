@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -13,7 +14,8 @@ import '../services/songs_service.dart';
 import '../theme.dart';
 
 /// 「樂器」tab of a song: 拆樂器 into six tracks (each plays and downloads on
-/// its own), then 換歌詞 sings new lyrics over the instrumental track.
+/// its own), 出譜 per track (opens the sheet page), and 換歌詞, which sings
+/// new lyrics over the instrumental track.
 class StemsView extends StatefulWidget {
   const StemsView({super.key, required this.song});
   final Song song;
@@ -26,6 +28,33 @@ class _StemsViewState extends State<StemsView> {
   late final Stream<SongStems?> _stems = context
       .read<SongsService>()
       .watchStems(widget.song.id);
+
+  late final Stream<Map<String, StemMidi>> _midis = context
+      .read<SongsService>()
+      .watchMidis(widget.song.id);
+
+  /// Signed URLs fetched ahead, so a tap opens a new tab at once (browsers
+  /// block a window opened after waiting on the network).
+  final _signed = <String, String>{};
+  final _signing = <String>{};
+  final _midiAsked = <String>{};
+
+  void _sign(String path, {String? downloadAs}) {
+    final key = downloadAs == null ? path : '$path|dl';
+    if (_signed.containsKey(key) || !_signing.add(key)) return;
+    context
+        .read<SongsService>()
+        .stemUrl(path, downloadAs: downloadAs)
+        .then((u) {
+          if (mounted) setState(() => _signed[key] = u);
+        })
+        .catchError((_) {
+          _signing.remove(key);
+        });
+  }
+
+  String _downloadName(Stem s) =>
+      '${widget.song.title} - ${s.label}.${s.path.split('.').last}';
 
   /// A separate output for previews, so the band's queue player keeps its song.
   AudioEngine? _preview;
@@ -69,13 +98,91 @@ class _StemsViewState extends State<StemsView> {
     await engine.play(url);
   }
 
-  Future<void> _download(Stem stem) async {
-    final ext = stem.path.split('.').last;
-    final url = await context.read<SongsService>().stemUrl(
-      stem.path,
-      downloadAs: '${widget.song.title} - ${stem.label}.$ext',
+  void _open(String url) {
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  /// The sheet page lives with the web app; native apps open the live site.
+  static Uri get _appBase => Uri.parse(
+    kIsWeb ? '${Uri.base.origin}/' : 'https://studio.toolution.net/',
+  );
+
+  /// 出譜 for one track: drums open the sheet page at once (it reads the drum
+  /// audio); other tracks first need MusicGPT's MIDI.
+  Future<void> _sheet(SongStems stems, Stem s, StemMidi? midi) async {
+    final drums = stems.stems.where((x) => x.kind == 'drums').firstOrNull;
+    final drumsUrl = drums == null ? null : _signed[drums.path];
+    if (s.kind == 'drums') {
+      if (drumsUrl == null) return;
+      _open(
+        SongsService.sheetPage(
+          appBase: _appBase,
+          kind: 'drums',
+          title: widget.song.title,
+          drumsUrl: drumsUrl,
+        ).toString(),
+      );
+      return;
+    }
+    if (midi != null && midi.isDone) {
+      final midiUrl = _signed[midi.midiPath!];
+      if (midiUrl == null) return;
+      _open(
+        SongsService.sheetPage(
+          appBase: _appBase,
+          kind: s.kind,
+          title: widget.song.title,
+          midiUrl: midiUrl,
+          drumsUrl: drumsUrl,
+        ).toString(),
+      );
+      return;
+    }
+    setState(() => _midiAsked.add(s.kind));
+    try {
+      await context.read<SongsService>().requestMidi(widget.song.id, s.kind);
+    } catch (e) {
+      _toast(e);
+      if (mounted) setState(() => _midiAsked.remove(s.kind));
+    }
+  }
+
+  Widget _sheetButton(SongStems stems, Stem s, StemMidi? midi) {
+    if (s.kind == 'instrumental') return const SizedBox(width: 48);
+    final busy =
+        midi?.status == 'generating' ||
+        (_midiAsked.contains(s.kind) && midi == null);
+    if (busy) {
+      return const Tooltip(
+        message: '轉緊樂譜，大約 1 分鐘',
+        child: SizedBox(
+          width: 48,
+          child: Center(
+            child: SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ),
+      );
+    }
+    final ready = s.kind == 'drums'
+        ? _signed.containsKey(s.path)
+        : midi == null || midi.isFailed || _signed.containsKey(midi.midiPath);
+    return IconButton(
+      tooltip: switch (s.kind) {
+        'drums' => '鼓譜',
+        'guitar' => '結他譜（tab）',
+        'bass' => 'Bass 譜（tab）',
+        _ => '樂譜',
+      },
+      icon: Icon(
+        midi?.isFailed ?? false
+            ? Icons.refresh_rounded
+            : Icons.library_music_outlined,
+      ),
+      onPressed: ready ? () => _sheet(stems, s, midi) : null,
     );
-    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   Future<void> _swap(SongStems stems) async {
@@ -155,45 +262,85 @@ class _StemsViewState extends State<StemsView> {
           ]);
         } else {
           for (final s in stems.stems) {
-            final playing = _playingPath == s.path;
-            children.add(
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: IconButton.filledTonal(
-                  tooltip: playing ? '暫停' : '播放',
-                  icon: Icon(
-                    playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  ),
-                  onPressed: () => _togglePlay(s),
-                ),
-                title: Text(s.label),
-                trailing: IconButton(
-                  tooltip: '下載',
-                  icon: const Icon(Icons.download_rounded),
-                  onPressed: () => _download(s),
-                ),
-              ),
-            );
+            _sign(s.path);
+            _sign(s.path, downloadAs: _downloadName(s));
           }
-          children.addAll([
-            const SizedBox(height: StudioSpacing.md),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: stems.instrumental == null
-                    ? null
-                    : () => _swap(stems),
-                icon: const Icon(Icons.lyrics_outlined),
-                label: const Text('換歌詞（用呢個伴奏唱新詞）'),
-              ),
-            ),
-          ]);
+          return StreamBuilder<Map<String, StemMidi>>(
+            stream: _midis,
+            builder: (context, msnap) {
+              final midis = msnap.data ?? const <String, StemMidi>{};
+              for (final m in midis.values) {
+                if (m.isDone) _sign(m.midiPath!);
+              }
+              return _doneList(stems, midis);
+            },
+          );
         }
         return ListView(
           padding: const EdgeInsets.fromLTRB(0, StudioSpacing.md, 0, 120),
           children: children,
         );
       },
+    );
+  }
+
+  Widget _doneList(SongStems stems, Map<String, StemMidi> midis) {
+    final children = <Widget>[];
+    for (final s in stems.stems) {
+      final playing = _playingPath == s.path;
+      final dl = _signed['${s.path}|dl'];
+      children.add(
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: IconButton.filledTonal(
+            tooltip: playing ? '暫停' : '播放',
+            icon: Icon(
+              playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            ),
+            onPressed: () => _togglePlay(s),
+          ),
+          title: Text(s.label),
+          subtitle: midis[s.kind]?.isFailed ?? false
+              ? Text(
+                  '出唔到譜：${midis[s.kind]!.error ?? ''}',
+                  style: const TextStyle(color: StudioColors.error),
+                )
+              : null,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _sheetButton(stems, s, midis[s.kind]),
+              IconButton(
+                tooltip: '下載',
+                icon: const Icon(Icons.download_rounded),
+                onPressed: dl == null ? null : () => _open(dl),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    children.addAll([
+      const SizedBox(height: StudioSpacing.md),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          onPressed: stems.instrumental == null ? null : () => _swap(stems),
+          icon: const Icon(Icons.lyrics_outlined),
+          label: const Text('換歌詞（用呢個伴奏唱新詞）'),
+        ),
+      ),
+      const SizedBox(height: StudioSpacing.sm),
+      Text(
+        '♫ 掣出譜：結他同 Bass 出 tab，鋼琴同人聲出五線譜，鼓出鼓譜。'
+        'AI 由錄音轉出嚟，大致啱，細節要人手執。每人每日出譜 20 次。',
+        style: Theme.of(context).textTheme.bodySmall
+            ?.copyWith(color: StudioColors.textSecondary),
+      ),
+    ]);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(0, StudioSpacing.md, 0, 120),
+      children: children,
     );
   }
 }

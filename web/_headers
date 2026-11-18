@@ -11,3 +11,5 @@
   Cache-Control: no-cache
 /index.html
   Cache-Control: no-cache
+/sheet/*
+  Cache-Control: no-cache
