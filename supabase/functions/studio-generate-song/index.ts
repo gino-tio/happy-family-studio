@@ -23,12 +23,16 @@
 //   STUDIO_MUSICGPT_KEY         required for provider "musicgpt" (async: task + webhook
 //                               studio-musicgpt-hook + polling here, two versions per song)
 //   STUDIO_MUSICGPT_MODEL       optional, default "v6"
+//   STUDIO_ACESTEP_URL          our Modal ACE-Step app (modal/acestep_app.py) for provider "acestep"
+//   STUDIO_ACESTEP_TOKEN        its bearer token (Modal secret studio-acestep, ACESTEP_TOKEN)
+//                               (async: Modal job + webhook studio-acestep-hook + polling here)
 // The app may pick the provider per song (request field `provider`).
 // Every function in the Hub project can read every secret, hence the STUDIO_ prefix.
 // SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are injected
 // by the platform.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { aceStepBody, aceStepConfig, ACESTEP_MODEL, finishAceStep, submitAceStep } from "./providers/acestep.ts";
 import { elevenLabsProvider } from "./providers/elevenlabs.ts";
 import { enrichMusicGpt, finishMusicGpt, musicgptBody, submitMusicGpt } from "./providers/musicgpt.ts";
 import { requestCover } from "../_shared/cover.ts";
@@ -52,7 +56,7 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-export const PROVIDERS = ["elevenlabs", "musicgpt"];
+export const PROVIDERS = ["elevenlabs", "musicgpt", "acestep"];
 
 function pickProvider(requested: string): MusicProvider {
   const name = requested || (Deno.env.get("STUDIO_MUSIC_PROVIDER") ?? "elevenlabs");
@@ -170,6 +174,47 @@ Deno.serve(async (req) => {
       const { data: rows } = await db.from("songs").select("id")
         .eq("provider_song_id", taskId).eq("status", "done").is("cover_path", null);
       for (const row of rows ?? []) await requestCover(row.id);
+    })());
+    return json(202, { song });
+  }
+
+  if (songReq.provider === "acestep") {
+    const cfg = aceStepConfig();
+    if (!cfg) return json(500, { error: "ACE-Step 未設定（缺 STUDIO_ACESTEP_URL / STUDIO_ACESTEP_TOKEN）" });
+    let jobId: string;
+    try {
+      jobId = await submitAceStep(cfg, aceStepBody(songReq, `${url}/functions/v1/studio-acestep-hook`));
+    } catch (e) {
+      return json(502, { error: (e as Error).message });
+    }
+    const { data: song, error: insertErr } = await db.from("songs").insert({
+      created_by: user.id,
+      title: songReq.title,
+      style: songReq.style,
+      lyrics: songReq.lyrics,
+      instrumental: songReq.instrumental,
+      length_ms: songReq.lengthMs,
+      provider: "acestep",
+      model: ACESTEP_MODEL,
+      status: "generating",
+      provider_song_id: jobId,
+    }).select().single();
+    if (insertErr) return json(500, { error: insertErr.message });
+    // Poll while this worker lives (150 s); a cold GPU start can take longer, and then the
+    // webhook finishes it. Claude draws the covers once the audio is in.
+    EdgeRuntime.waitUntil((async () => {
+      const started = Date.now();
+      while (Date.now() - started < 130_000) {
+        await new Promise((r) => setTimeout(r, 6_000));
+        try {
+          const r = await finishAceStep(admin, SCHEMA, BUCKET, cfg, jobId);
+          if (r.state === "pending") continue;
+          if (r.state === "done") for (const id of r.ids) await requestCover(id);
+          return;
+        } catch (e) {
+          console.error("acestep finish failed", (e as Error).message);
+        }
+      }
     })());
     return json(202, { song });
   }

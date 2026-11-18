@@ -78,6 +78,12 @@ per-step velocity, >2 bars, sample-based instruments.
   function polls ~135 s and `studio-musicgpt-hook` (verify_jwt off, unsigned webhook = nudge only,
   result re-read from MusicGPT with our key) finishes later ones. Version 2 becomes a second row
   "<title> (v2)".
+- **Third singer: ACE-Step 1.5 on our own Modal GPU** (Gino 2026-11-18, after hearing it sing
+  Cantonese: "not bad, can use"). `modal/acestep_app.py` (XL turbo + 4B LM, `yue`, two takes, L40S,
+  scales to zero; setup in `modal/README.md`), `providers/acestep.ts`, secrets
+  `STUDIO_ACESTEP_URL` / `STUDIO_ACESTEP_TOKEN`. Same async shape as MusicGPT: Modal job id in
+  `provider_song_id`, polling ~130 s, then `studio-acestep-hook` (verify_jwt off, nudge only).
+  Covers are Claude SVGs. The app labels it 「ACE-Step（實驗）」.
 - **Vendor keys never reach the client.** Only `studio-generate-song` talks to the AI
   music API; keys are Supabase secrets.
 - **Membership, not sign-in, is the gate.** Every RLS policy checks
