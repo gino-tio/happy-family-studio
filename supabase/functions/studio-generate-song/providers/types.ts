@@ -9,7 +9,7 @@ export interface SongRequest {
   lyrics: string;
   instrumental: boolean;
   lengthMs: number | null;
-  /** "elevenlabs" or "musicgpt"; empty = STUDIO_MUSIC_PROVIDER. */
+  /** "elevenlabs", "musicgpt" or "acestep"; empty = STUDIO_MUSIC_PROVIDER. */
   provider: string;
 }
 

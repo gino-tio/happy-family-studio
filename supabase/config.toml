@@ -13,3 +13,6 @@ verify_jwt = false
 
 [functions.studio-song-cover]
 verify_jwt = true
+
+[functions.studio-acestep-hook]
+verify_jwt = false

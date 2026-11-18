@@ -176,14 +176,18 @@ class _ComposeScreenState extends State<ComposeScreen> {
             SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'elevenlabs', label: Text('ElevenLabs')),
-                ButtonSegment(
-                  value: 'musicgpt',
-                  label: Text('MusicGPT（廣東話・兩個版本）'),
-                ),
+                ButtonSegment(value: 'musicgpt', label: Text('MusicGPT')),
+                ButtonSegment(value: 'acestep', label: Text('ACE-Step（實驗）')),
               ],
               selected: {_provider},
               onSelectionChanged: (v) => setState(() => _provider = v.first),
             ),
+            const SizedBox(height: StudioSpacing.xs),
+            Text(switch (_provider) {
+              'musicgpt' => 'MusicGPT：廣東話，一次兩個版本',
+              'acestep' => 'ACE-Step：開源模型，廣東話，一次兩個版本',
+              _ => 'ElevenLabs：中文會唱普通話',
+            }, style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: StudioSpacing.md),
             Text('長度：${_seconds.round()} 秒'),
             Slider(
