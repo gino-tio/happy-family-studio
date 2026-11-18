@@ -137,6 +137,48 @@ class SongsService {
   Future<void> splitSong(String songId) =>
       _tool({'action': 'stems', 'song_id': songId});
 
+  /// MIDI rows of a song's tracks, newest first per kind (a retry after a
+  /// failure replaces the failed one in the map).
+  Stream<Map<String, StemMidi>> watchMidis(String songId) => _db
+      .from('stem_midis')
+      .stream(primaryKey: ['id'])
+      .eq('song_id', songId)
+      .order('created_at', ascending: true)
+      .map(
+        (rows) => {
+          for (final r in rows) r['kind'] as String: StemMidi.fromRow(r),
+        },
+      );
+
+  /// 出譜: turns one track of a finished split into MIDI in the background.
+  Future<void> requestMidi(String songId, String kind) =>
+      _tool({'action': 'midi', 'song_id': songId, 'kind': kind});
+
+  /// The sheet page (web/sheet/) with everything in the fragment, which never
+  /// reaches a server. [midiUrl] for pitched tracks; [drumsUrl] is the drum
+  /// track, read for drum hits (kind drums) or for the tempo.
+  static Uri sheetPage({
+    required Uri appBase,
+    required String kind,
+    required String title,
+    String? midiUrl,
+    String? drumsUrl,
+  }) {
+    final f = <String, String>{
+      'kind': kind,
+      'title': title,
+      'midi': ?midiUrl,
+      (kind == 'drums' ? 'audio' : 'beat'): ?drumsUrl,
+    };
+    return appBase
+        .resolve('sheet/index.html')
+        .replace(
+          fragment: f.entries
+              .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+              .join('&'),
+        );
+  }
+
   /// 換歌詞: sings [lyrics] over the song's instrumental track (needs a
   /// finished split). Returns the new song (status `generating`).
   Future<Song> swapLyrics(

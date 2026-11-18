@@ -95,7 +95,13 @@ per-step velocity, >2 bars, sample-based instruments.
   links, so the function uploads files. byId conversionType follows the song's model
   (`conversionTypeFor`). The Extraction byId shape isn't documented: `findStemUrls` walks the
   reply and logs field names if it finds none. studio-musicgpt-hook finishes splits too.
-  Next (PR 2): 出譜 = Audio to MIDI per track, drawn as drum sheet / guitar & bass tab / staff.
+  出譜 (migration studio_0005_sheets): vocals / piano / bass / guitar tracks → MusicGPT Audio to
+  MIDI (action `midi`, 20/member/HK day) into `stem_midis` (`<user>/stems/<song>/<kind>.mid`);
+  drums need no MIDI. The static page `web/sheet/` (alphaTab 1.8.4 + @tonejs/midi from jsDelivr,
+  pure logic in `transcribe.js`, `deno test web/sheet/`) takes everything in the URL fragment,
+  quantizes to a 16th grid (tempo guessed from the drum track's hits, editable), draws guitar /
+  bass tab + staff, staff for piano / vocals, and finds kick / snare / hi-hat in the drum audio
+  by frequency band for the 鼓譜. 列印 / PDF = alphaTab print. Transcription is rough by design.
 - **Vendor keys never reach the client.** Only Edge Functions (`studio-generate-song`, `studio-song-tools`) talk to the AI
   music API; keys are Supabase secrets.
 - **Membership, not sign-in, is the gate.** Every RLS policy checks

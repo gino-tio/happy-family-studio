@@ -1,6 +1,6 @@
 // deno test supabase/functions/studio-song-tools/tools_test.ts
 import { assertEquals } from "jsr:@std/assert@1";
-import { audioTypeFor, findStemUrls, parseStemsReply, parseToolRequest, vocalPrompt } from "./tools.ts";
+import { audioTypeFor, findMidiUrl, findStemUrls, parseMidiReply, parseStemsReply, parseToolRequest, vocalPrompt } from "./tools.ts";
 import { conversionTypeFor } from "../studio-generate-song/providers/musicgpt.ts";
 
 const U = "00000000-0000-4000-8000-00000000000a";
@@ -69,4 +69,16 @@ Deno.test("helpers", () => {
   assertEquals(conversionTypeFor("sing_over_instrumental"), "SING_OVER_INSTRUMENTAL");
   assertEquals(conversionTypeFor("remix"), "REMIX");
   assertEquals(conversionTypeFor("v6"), "MUSIC_AI");
+});
+
+Deno.test("findMidiUrl and parseMidiReply", () => {
+  assertEquals(findMidiUrl({ a: "https://x/y.mp3", b: { c: "https://cdn/x/out.mid?s=1" } }), "https://cdn/x/out.mid?s=1");
+  assertEquals(findMidiUrl({ conversion_path: JSON.stringify({ midi: "https://c/a.midi" }) }), "https://c/a.midi");
+  assertEquals(parseMidiReply({ conversion: { status: "COMPLETED", midi_url: "https://c/a.mid" } }), {
+    state: "done",
+    url: "https://c/a.mid",
+  });
+  assertEquals(parseMidiReply({ conversion: { status: "COMPLETED" } }), { state: "pending" });
+  assertEquals(typeof parseToolRequest({ action: "midi", song_id: S, kind: "drums" }, U), "string");
+  assertEquals(parseToolRequest({ action: "midi", song_id: S, kind: "bass" }, U), { action: "midi", songId: S, kind: "bass" });
 });

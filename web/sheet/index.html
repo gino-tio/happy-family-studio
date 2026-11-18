@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>樂譜 · TIO Studio</title>
+<!--
+  出譜 page (Gino, 2026-11-18). The app opens it with everything in the URL fragment (never sent to
+  a server): #kind=guitar|bass|piano|vocals|drums&title=...&midi=<signed MIDI URL>
+  &audio=<signed drum-track URL>&beat=<signed drum-track URL, for the tempo>.
+  Pitched tracks come from MusicGPT Audio to MIDI; drums are found here from the drum track's audio
+  (kick / snare / hi-hat by frequency band). alphaTab draws the score; 列印 / PDF uses its print.
+-->
+<style>
+  :root { --bg: #ffffff; --fg: #1d1b20; --muted: #6b6870; --accent: #7a4cf0; --line: #e4e1ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "PingFang HK", "Noto Sans HK", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  h1 { font-size: 17px; margin: 0; flex: 1 1 200px; }
+  label { color: var(--muted); font-size: 13px; }
+  input[type=number] { width: 72px; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  button, a.btn { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; text-decoration: none; }
+  button.ghost, a.btn.ghost { background: transparent; color: var(--accent); }
+  #status { padding: 12px 16px; color: var(--muted); }
+  #note { padding: 0 16px 8px; color: var(--muted); font-size: 13px; }
+  #score { padding: 0 8px 40px; }
+  @media print { header, #note, #status { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">樂譜</h1>
+  <label>速度 BPM <input id="bpm" type="number" min="40" max="240" step="1"></label>
+  <button id="redraw" class="ghost">重畫</button>
+  <a id="midi" class="btn ghost" download hidden>下載 MIDI</a>
+  <button id="print">列印 / PDF</button>
+</header>
+<div id="status">準備緊…</div>
+<div id="note">AI 由錄音轉出嚟嘅譜係大致啱，細節要人手執。速度唔啱可以改 BPM 再重畫。</div>
+<div id="score"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/alphaTab.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/build/Midi.js"></script>
+<script type="module">
+import { drumTex, estimateBpm, onsets, pitchedTex } from "./transcribe.js";
+
+const params = new URLSearchParams(location.hash.slice(1));
+const kind = params.get("kind") ?? "guitar";
+const title = params.get("title") ?? "";
+const $ = (id) => document.getElementById(id);
+const status = (t) => { $("status").textContent = t; $("status").hidden = !t; };
+$("title").textContent = `${title}・${{ guitar: "結他譜", bass: "Bass 譜", piano: "鋼琴譜", vocals: "人聲旋律", drums: "鼓譜" }[kind] ?? "樂譜"}`;
+document.title = $("title").textContent;
+
+const AT = "https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/";
+const api = new alphaTab.AlphaTabApi($("score"), {
+  core: { fontDirectory: `${AT}font/`, useWorkers: false, engine: "svg" },
+  display: { scale: 0.9, layoutMode: "page" },
+  player: { enablePlayer: false },
+});
+api.error.on((e) => status(`畫唔到：${e?.message ?? e}`));
+api.renderFinished.on(() => status(""));
+
+/** Decodes an audio URL to mono samples at 22.05 kHz, optionally through one filter. */
+async function bandSamples(buf, type, freq, q = 0.7) {
+  const sr = 22050;
+  const ctx = new OfflineAudioContext(1, Math.ceil(buf.duration * sr), sr);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const f = ctx.createBiquadFilter();
+  f.type = type;
+  f.frequency.value = freq;
+  f.Q.value = q;
+  src.connect(f).connect(ctx.destination);
+  src.start();
+  return (await ctx.startRendering()).getChannelData(0);
+}
+
+/** RMS per 10 ms hop. */
+function envelope(x, sr = 22050, hop = 220) {
+  const out = new Array(Math.floor(x.length / hop));
+  for (let i = 0; i < out.length; i++) {
+    let s = 0;
+    for (let j = i * hop; j < (i + 1) * hop; j++) s += x[j] * x[j];
+    out[i] = Math.sqrt(s / hop);
+  }
+  return out;
+}
+const HOP_S = 220 / 22050;
+
+let drumHits = null; // [{part, time}]
+let notes = null; // [{midi, time, duration}]
+let t0 = 0;
+
+async function loadDrums(url) {
+  const raw = await (await fetch(url)).arrayBuffer();
+  const buf = await new AudioContext().decodeAudioData(raw);
+  const bands = {
+    kick: await bandSamples(buf, "lowpass", 110),
+    snare: await bandSamples(buf, "bandpass", 1800, 0.8),
+    hihat: await bandSamples(buf, "highpass", 7000),
+  };
+  const hits = [];
+  for (const [part, x] of Object.entries(bands)) {
+    // Bands bleed into each other, so each part needs a clear jump above its own level.
+    const sens = part === "hihat" ? 2 : 2.5;
+    for (const i of onsets(envelope(x), { sensitivity: sens, floor: 0.1, minGapFrames: part === "hihat" ? 8 : 10 })) {
+      hits.push({ part, time: i * HOP_S });
+    }
+  }
+  return hits.sort((a, b) => a.time - b.time);
+}
+
+async function loadMidi(url) {
+  const midi = new Midi(await (await fetch(url)).arrayBuffer());
+  const out = [];
+  for (const tr of midi.tracks) for (const n of tr.notes) out.push({ midi: n.midi, time: n.time, duration: n.duration });
+  return out.sort((a, b) => a.time - b.time);
+}
+
+function draw() {
+  const bpm = Number($("bpm").value) || 100;
+  status("畫緊…");
+  const tex = kind === "drums"
+    ? drumTex(drumHits ?? [], bpm, t0, title)
+    : pitchedTex(kind, notes ?? [], bpm, t0, title);
+  api.tex(tex);
+}
+
+async function main() {
+  try {
+    const midiUrl = params.get("midi");
+    const drumsUrl = params.get("audio") ?? params.get("beat");
+    if (kind !== "drums" && !midiUrl) throw new Error("冇 MIDI");
+    if (kind === "drums" && !drumsUrl) throw new Error("冇鼓嘅音軌");
+    status(kind === "drums" ? "分析緊鼓聲（大約 10 至 30 秒）…" : "讀緊 MIDI…");
+    if (midiUrl) {
+      notes = await loadMidi(midiUrl);
+      const a = $("midi");
+      a.href = midiUrl;
+      a.download = `${title} - ${kind}.mid`;
+      a.hidden = false;
+    }
+    if (drumsUrl) {
+      status("分析緊速度同鼓聲…");
+      drumHits = await loadDrums(drumsUrl);
+    }
+    const timing = drumHits?.length ? drumHits : (notes ?? []).map((n) => ({ time: n.time }));
+    const bpm = estimateBpm(timing.map((h) => h.time)) ?? 100;
+    // Start the grid at the first kick (or first sound), so bar lines land on the downbeat.
+    const firstKick = drumHits?.find((h) => h.part === "kick");
+    t0 = firstKick?.time ?? timing[0]?.time ?? 0;
+    if (notes?.length && notes[0].time < t0) {
+      const beat = 60 / bpm;
+      t0 -= Math.ceil((t0 - notes[0].time) / (beat * 4)) * beat * 4; // whole bars earlier
+    }
+    $("bpm").value = String(Math.round(bpm));
+    if (kind === "drums") {
+      // Offer the hits as a MIDI file too.
+      const m = new Midi();
+      m.header.setTempo(bpm);
+      const tr = m.addTrack();
+      tr.channel = 9;
+      const num = { kick: 36, snare: 38, hihat: 42 };
+      for (const h of drumHits) tr.addNote({ midi: num[h.part], time: Math.max(0, h.time - t0), duration: 0.1, velocity: 0.8 });
+      const a = $("midi");
+      a.href = URL.createObjectURL(new Blob([m.toArray()], { type: "audio/midi" }));
+      a.download = `${title} - drums.mid`;
+      a.hidden = false;
+    }
+    draw();
+  } catch (e) {
+    status(`出唔到譜：${e?.message ?? e}`);
+  }
+}
+
+$("redraw").onclick = draw;
+$("print").onclick = () => api.print();
+main();
+</script>
+</body>
+</html>
